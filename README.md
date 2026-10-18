@@ -53,14 +53,16 @@ the preview in the most dependable format the printer accepts:
 2. **PWG raster**, when it doesn't. Every IPP Everywhere / Mopria printer must accept this format, and
    its header states the exact resolution and paper size, so the printer can't misjudge how big the page
    is. (Two-sided isn't available on this route.)
-3. **AirPrint raster (URF)**, for printers that list only that, such as many Canon PIXMA inkjets. Same idea
-   as PWG raster: one multi-page job with the resolution stated in each page header.
-4. **JPEG**, only as a last resort. A JPEG can't reliably carry a physical size: a printer may print each
-   pixel at its own native resolution and ignore the file's stated dpi, which can shrink a page to a
-   quarter of its size. So the app sends just the printable area and asks the printer to fit it to the
-   page, which keeps sizes within a few percent. JPEG jobs are one page each, so the app sends a page,
-   waits for the printer to finish it, then sends the next (and retries while the printer says it is busy).
-   Keep NBS Print open until a JPEG job finishes.
+3. **JPEG**, for printers with no PDF or PWG raster, such as many Canon PIXMA inkjets. A JPEG can't
+   reliably carry a physical size: a printer may print each pixel at its own native resolution and ignore
+   the file's stated dpi, which can shrink a page to a quarter of its size. So the app sends just the
+   printable area and asks the printer to fit it to the page, which keeps sizes within a few percent. This
+   is the route proven to print at true size on a real Canon. JPEG jobs are one page each, so the app sends
+   a page, waits for the printer to finish it, then sends the next (and retries while the printer says it is
+   busy). Keep NBS Print open until a JPEG job finishes.
+4. **AirPrint raster (URF)**, one multi-page job with the resolution in each page header. Used only when a
+   printer takes nothing else, or if you pick it under Options → Send as. On one real Canon it printed
+   about 10% small, so it is not the automatic choice.
 
 Where the printer allows it the job is also marked "don't rescale", so 100% stays 100%. If a printout ever
 comes out the wrong size, open **Options → Send as** and try another format (shown only when the printer

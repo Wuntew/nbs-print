@@ -95,10 +95,12 @@ class BuildTicketTest {
     // ---- choosing how to send ----------------------------------------------------------------
 
     @Test
-    fun routesAreOrderedPdfThenRasterThenJpeg() {
+    fun routesAreOrderedPdfThenRasterThenJpegThenAirPrint() {
         val all = caps(formats = pdfOnly + rasterOnly + urfOnly + jpegOnly, urfSupported = urfTokens)
-        assertEquals(listOf(PrintRoute.PDF, PrintRoute.RASTER, PrintRoute.URF, PrintRoute.JPEG), all.routes)
-        assertEquals(PrintRoute.URF, caps(formats = urfOnly + jpegOnly, urfSupported = urfTokens).routeFor(null))
+        assertEquals(listOf(PrintRoute.PDF, PrintRoute.RASTER, PrintRoute.JPEG, PrintRoute.URF), all.routes)
+        assertEquals(PrintRoute.JPEG, caps(formats = urfOnly + jpegOnly, urfSupported = urfTokens).routeFor(null))
+        assertEquals(PrintRoute.URF, caps(formats = urfOnly, urfSupported = urfTokens).routeFor(null))
+        assertEquals(PrintRoute.URF, caps(formats = urfOnly + jpegOnly, urfSupported = urfTokens).routeFor(PrintRoute.URF))
         assertEquals(PrintRoute.RASTER, caps(formats = rasterOnly + jpegOnly).routeFor(null))
         assertEquals(PrintRoute.JPEG, caps(formats = jpegOnly).routeFor(null))
         assertNull(caps(formats = setOf("application/octet-stream")).routeFor(null))
@@ -183,7 +185,7 @@ class BuildTicketTest {
             .finish()
         val c = PrinterCaps.parse(IppCodec.decode(bytes))
         assertEquals(setOf("V1.4", "CP1", "W8", "SRGB24", "RS300-600"), c.urfSupported)
-        assertEquals(listOf(PrintRoute.URF, PrintRoute.JPEG), c.routes)
+        assertEquals(listOf(PrintRoute.JPEG, PrintRoute.URF), c.routes)
     }
 
     @Test

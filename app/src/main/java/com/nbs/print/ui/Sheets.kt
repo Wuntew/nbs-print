@@ -334,7 +334,7 @@ internal fun OptionsSheet(state: UiState, onDirect: ((DirectParams) -> DirectPar
         PrintRoute.JPEG -> {
             Spacer(Modifier.height(14.dp))
             Hint(
-                "This printer only takes JPEG pictures, which can't state a physical size. Pages are sent one at a " +
+                "Pages go as JPEG pictures, which can't state a physical size. They are sent one at a " +
                     "time, so keep NBS Print open until the last one is out. Copies come out uncollated and the size " +
                     "may be off by a few percent."
             )

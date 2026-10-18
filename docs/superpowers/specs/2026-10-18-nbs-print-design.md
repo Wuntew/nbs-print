@@ -145,6 +145,19 @@ misnamed.
   sequentially with progress; a `--urf-only --one-at-a-time` printer received a single 5-page URF job that
   decodes to 2550x3300 px at 300 dpi. Not verified: the real Canon (unknown which formats it lists).
 
+## v1.2.3: AirPrint raster printed about 10% small on a real Canon (2026-10-18)
+
+**Report:** after 1.2.2 a 1 inch square printed at about 0.9 inch on the user's Canon MG3600. No scaling must
+mean true size, and 1.2.1's JPEG route had been right on that printer.
+
+**Cause:** 1.2.2 made the AirPrint raster route the automatic choice for printers that list URF and JPEG. It
+was exact on the mock printer but had never met a real printer, and this one does not print it 1:1.
+The exact reason is unknown (the printer wasn't available).
+
+**Fix:** route order is now PDF, PWG raster, **JPEG**, AirPrint raster. JPEG (cropped to the printable area,
+`print-scaling=fit`) is the route with real-printer evidence of true size, and 1.2.2 already made it work for
+many pages by sending one page at a time. AirPrint raster stays available under Options > Send as.
+
 ## Out of scope
 
 Office/web conversion, tiling oversized content across sheets, vector PDF output, password-protected PDFs,
