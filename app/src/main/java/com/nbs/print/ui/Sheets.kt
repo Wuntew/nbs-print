@@ -41,6 +41,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.nbs.print.ipp.Destination
+import com.nbs.print.ipp.PrintRoute
 import com.nbs.print.layout.Anchor
 import com.nbs.print.layout.MarginMode
 import com.nbs.print.layout.PageMode
@@ -304,7 +305,8 @@ internal fun OptionsSheet(state: UiState, onDirect: ((DirectParams) -> DirectPar
         SectionLabel("Color")
         Segmented(listOf(true to "Color", false to "Black & white"), selected = d.color) { v -> onDirect { it.copy(color = v) } }
     }
-    if (caps.canDuplex) {
+    val route = caps.routeFor(d.format)
+    if (route == PrintRoute.PDF && caps.hasDuplex) {
         SectionLabel("Two-sided")
         Segmented(
             listOf(TwoSided.OFF to "Off", TwoSided.LONG_EDGE to "Long edge", TwoSided.SHORT_EDGE to "Short edge"),
@@ -313,11 +315,32 @@ internal fun OptionsSheet(state: UiState, onDirect: ((DirectParams) -> DirectPar
         Spacer(Modifier.height(8.dp))
         Hint("Long edge flips like a book; short edge flips like a notepad.")
     }
-    if (!caps.canPdf) {
-        Spacer(Modifier.height(16.dp))
-        Hint("This printer takes one page at a time, so two-sided isn't available and copies come out uncollated.")
+
+    if (caps.routes.size > 1) {
+        SectionLabel("Send as")
+        Segmented(
+            listOf<Pair<PrintRoute?, String>>(null to "Auto") + caps.routes.map { it to it.label },
+            selected = d.format,
+        ) { v -> onDirect { it.copy(format = v) } }
+        Spacer(Modifier.height(8.dp))
+        Hint("Auto picks the most dependable format for this printer. If a printout comes out the wrong size, try another.")
     }
-    if (!caps.scalingNoneSupported) {
+
+    when (route) {
+        PrintRoute.RASTER -> if (caps.hasDuplex) {
+            Spacer(Modifier.height(14.dp))
+            Hint("Pages go to this printer as images, so two-sided isn't available. Choose PDF above if it offers it.")
+        }
+        PrintRoute.JPEG -> {
+            Spacer(Modifier.height(14.dp))
+            Hint(
+                "This printer only takes JPEG pictures. They can't state a physical size, so pages go one at a time, " +
+                    "copies come out uncollated, and the size may be off by a few percent."
+            )
+        }
+        else -> {}
+    }
+    if (route != PrintRoute.JPEG && !caps.scalingNoneSupported) {
         Spacer(Modifier.height(10.dp))
         Hint("This printer can't be told to skip its own scaling, so output may be slightly resized. The Android print dialog may behave differently.")
     }

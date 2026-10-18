@@ -26,8 +26,11 @@ data class JobTicket(
     /** true = color, false = monochrome. */
     val color: Boolean? = null,
     val media: String? = null,
-    /** Ask the printer not to rescale: our pages are already exactly paper-sized. */
-    val scalingNone: Boolean = true,
+    /**
+     * print-scaling to request: "none" when the page already carries its exact size (PDF, raster),
+     * "fit" for JPEG, or null to leave the printer's default.
+     */
+    val scaling: String? = "none",
 )
 
 data class SentJob(val id: Int?, val state: Int?)
@@ -66,6 +69,7 @@ class IppClient(private val network: Network? = null) {
                         "printer-is-accepting-jobs", "document-format-supported", "copies-supported",
                         "color-supported", "print-color-mode-supported", "sides-supported", "media-supported",
                         "print-scaling-supported", "printer-resolution-supported",
+                        "pwg-raster-document-type-supported", "pwg-raster-document-resolution-supported",
                         "media-left-margin-supported", "media-right-margin-supported",
                         "media-top-margin-supported", "media-bottom-margin-supported",
                     ),
@@ -87,7 +91,7 @@ class IppClient(private val network: Network? = null) {
             ticket.sides?.let { w.keyword("sides", it) }
             ticket.color?.let { w.keyword("print-color-mode", if (it) "color" else "monochrome") }
             ticket.media?.let { w.keyword("media", it) }
-            if (ticket.scalingNone) w.keyword("print-scaling", "none")
+            ticket.scaling?.let { w.keyword("print-scaling", it) }
             w.finish()
         }
         val job = reply.group(IppTag.JOB_GROUP)

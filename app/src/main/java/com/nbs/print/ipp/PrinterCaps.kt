@@ -2,6 +2,21 @@ package com.nbs.print.ipp
 
 import com.nbs.print.layout.Paper
 
+/** How the pages travel to a printer, best first. */
+enum class PrintRoute(val label: String) {
+    /** application/pdf: one multi-page document; the page size is in the file. */
+    PDF("PDF"),
+
+    /** image/pwg-raster: page images whose header states the exact resolution and paper size. */
+    RASTER("Raster"),
+
+    /** image/jpeg: one image per page; its physical size is left to the printer's interpretation. */
+    JPEG("JPEG"),
+}
+
+/** The resolution and color format a printer wants for PWG raster. */
+data class RasterPlan(val dpi: Int, val gray: Boolean)
+
 /** What a network printer says it can do (from Get-Printer-Attributes). */
 data class PrinterCaps(
     val name: String,
@@ -17,17 +32,58 @@ data class PrinterCaps(
     val sides: Set<String>,
     /** PWG media keywords such as na_letter_8.5x11in. Empty when the printer didn't say. */
     val media: Set<String>,
-    val scalingNoneSupported: Boolean,
+    /** print-scaling-supported: none, fit, fill, auto. */
+    val printScaling: Set<String>,
     val resolutionsDpi: List<Int>,
+    /** pwg-raster-document-type-supported, e.g. srgb_8 and sgray_8. */
+    val rasterTypes: Set<String> = emptySet(),
+    /** pwg-raster-document-resolution-supported (square resolutions only). */
+    val rasterDpis: List<Int> = emptyList(),
     /** Largest hardware margin the printer reports, in points; null if unreported. */
     val marginPt: Float?,
 ) {
+    val scalingNoneSupported get() = "none" in printScaling
     val canPdf get() = "application/pdf" in formats
     val canJpeg get() = "image/jpeg" in formats
-    val canPrint get() = canPdf || canJpeg
+    val canRaster get() = "image/pwg-raster" in formats && rasterPlan(color = true) != null
+
+    /** Formats this printer can take, best first: PDF, then PWG raster, then JPEG. */
+    val routes: List<PrintRoute>
+        get() = listOfNotNull(
+            PrintRoute.PDF.takeIf { canPdf },
+            PrintRoute.RASTER.takeIf { canRaster },
+            PrintRoute.JPEG.takeIf { canJpeg },
+        )
+    val canPrint get() = routes.isNotEmpty()
+
+    /** The route to use: [preferred] if the printer takes it, otherwise the best one. Null if it takes none. */
+    fun routeFor(preferred: PrintRoute?): PrintRoute? = routes.firstOrNull { it == preferred } ?: routes.firstOrNull()
+
+    /** The printer lists two-sided modes at all. */
+    val hasDuplex get() = "two-sided-long-edge" in sides || "two-sided-short-edge" in sides
 
     /** Two-sided needs one multi-page document, which only the PDF route provides. */
-    val canDuplex get() = canPdf && ("two-sided-long-edge" in sides || "two-sided-short-edge" in sides)
+    val canDuplex get() = canPdf && hasDuplex
+
+    /**
+     * How to render for PWG raster: a resolution the printer lists (as close to 300 dpi as possible,
+     * and no bigger than 400 so a page bitmap stays a sensible size) and a color format it accepts.
+     * Null if the printer's lists leave nothing usable.
+     */
+    fun rasterPlan(color: Boolean): RasterPlan? {
+        val types = rasterTypes.ifEmpty { setOf("srgb_8") }
+        val gray = when {
+            !color && "sgray_8" in types -> true
+            "srgb_8" in types -> false
+            "sgray_8" in types -> true
+            else -> return null
+        }
+        val dpi = rasterDpis.ifEmpty { listOf(300) }
+            .filter { it in 150..400 }
+            .minByOrNull { kotlin.math.abs(it - 300) }
+            ?: return null
+        return RasterPlan(dpi, gray)
+    }
 
     fun supportsPaper(p: Paper) = media.isEmpty() || p.pwgMedia in media
 
@@ -87,9 +143,13 @@ data class PrinterCaps(
                 monochromeSupported = colorModes.isEmpty() || "monochrome" in colorModes,
                 sides = p.strings("sides-supported").toSet(),
                 media = p.strings("media-supported").toSet(),
-                scalingNoneSupported = "none" in p.strings("print-scaling-supported"),
+                printScaling = p.strings("print-scaling-supported").toSet(),
                 resolutionsDpi = p["printer-resolution-supported"].mapNotNull { v ->
                     (v as? IppValue.Resolution)?.takeIf { it.units == 3 }?.let { minOf(it.crossFeed, it.feed) }
+                },
+                rasterTypes = p.strings("pwg-raster-document-type-supported").toSet(),
+                rasterDpis = p["pwg-raster-document-resolution-supported"].mapNotNull { v ->
+                    (v as? IppValue.Resolution)?.takeIf { it.units == 3 && it.crossFeed == it.feed }?.crossFeed
                 },
                 // Margins are reported in hundredths of a millimetre.
                 marginPt = margins.maxOrNull()?.let { it / 100f / 25.4f * 72f },

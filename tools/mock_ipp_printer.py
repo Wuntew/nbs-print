@@ -8,7 +8,7 @@ the app sent.
     python tools/mock_ipp_printer.py --port 8631 --out scratch/jobs
 
 From the Android emulator the host machine is 10.0.2.2, so add the printer in the app as
-"10.0.2.2:8631". Flags simulate awkward printers: --jpeg-only, --ipp11, --no-scaling-attr,
+"10.0.2.2:8631". Flags simulate awkward printers: --jpeg-only, --raster-only, --engine-dpi 1200, --ipp11, --no-scaling-attr,
 --reason media-empty-error, --abort-jobs, --polls 30 (slow), --report-pages.
 """
 import argparse
@@ -88,8 +88,12 @@ class Printer:
 
     def printer_attributes(self):
         a = self.args
-        formats = ["image/jpeg", "image/urf", "image/pwg-raster"] if a.jpeg_only else \
-            ["application/pdf", "image/jpeg", "image/urf", "image/pwg-raster"]
+        if a.jpeg_only:
+            formats = ["image/jpeg", "image/urf"]
+        elif a.raster_only:
+            formats = ["image/pwg-raster", "image/jpeg", "image/urf"]
+        else:
+            formats = ["application/pdf", "image/jpeg", "image/urf", "image/pwg-raster"]
         out = attr(NAME, "printer-name", "Mock Laser 9000")
         out += attr(TEXT, "printer-make-and-model", "NBS Mock IPP Printer")
         out += attr(ENUM, "printer-state", i32(3))
@@ -104,8 +108,12 @@ class Printer:
         out += multi(KEYWORD, "media-supported", ["na_letter_8.5x11in", "iso_a4_210x297mm", "na_legal_8.5x14in"])
         if not a.no_scaling_attr:
             out += multi(KEYWORD, "print-scaling-supported", ["auto", "fill", "fit", "none"])
-        out += attr(RES, "printer-resolution-supported", i32(300) + i32(300) + b"\x03")
-        out += attr(RES, "", i32(600) + i32(600) + b"\x03")
+        out += attr(RES, "printer-resolution-supported", i32(a.engine_dpi) + i32(a.engine_dpi) + b"\x03")
+        if "image/pwg-raster" in formats and not a.jpeg_only:
+            out += multi(KEYWORD, "pwg-raster-document-type-supported", ["sgray_8", "srgb_8"])
+            out += attr(RES, "pwg-raster-document-resolution-supported", i32(300) + i32(300) + b"\x03")
+            out += attr(RES, "", i32(600) + i32(600) + b"\x03")
+            out += multi(KEYWORD, "pwg-raster-document-sheet-back", ["normal"])
         for side in ("left", "right", "top", "bottom"):
             out += multi(INT, f"media-{side}-margin-supported", [i32(0), i32(423)])
         # A nested collection, as real printers send, to exercise the app's decoder.
@@ -132,7 +140,7 @@ class Printer:
 
         if op == 0x0002:  # Print-Job
             fmt = opattrs.get("document-format", ["application/octet-stream"])[0]
-            ext = {"application/pdf": "pdf", "image/jpeg": "jpg"}.get(fmt, "bin")
+            ext = {"application/pdf": "pdf", "image/jpeg": "jpg", "image/pwg-raster": "pwg"}.get(fmt, "bin")
             with self.lock:
                 job_id = self.next_job
                 self.next_job += 1
@@ -210,7 +218,9 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", type=int, default=8631)
     ap.add_argument("--out", default="scratch/jobs")
-    ap.add_argument("--jpeg-only", action="store_true", help="don't advertise application/pdf")
+    ap.add_argument("--jpeg-only", action="store_true", help="only advertise JPEG (and URF), no PDF or PWG raster")
+    ap.add_argument("--raster-only", action="store_true", help="advertise PWG raster and JPEG but no PDF (like many Brother and Epson printers)")
+    ap.add_argument("--engine-dpi", type=int, default=600, help="the printer's native resolution, e.g. 1200")
     ap.add_argument("--ipp11", action="store_true", help="reject IPP 2.0 requests, accept 1.1 only")
     ap.add_argument("--no-scaling-attr", action="store_true", help="don't advertise print-scaling-supported")
     ap.add_argument("--reason", help="printer-state-reasons to report, e.g. media-empty-error")

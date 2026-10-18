@@ -52,6 +52,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nbs.print.ipp.Destination
+import com.nbs.print.ipp.PrintRoute
 import com.nbs.print.ipp.PrinterRef
 import com.nbs.print.layout.PageParse
 import com.nbs.print.layout.PageRanges
@@ -375,7 +376,7 @@ private fun optionsSummary(state: UiState): String {
     return buildList {
         add(if (d.copies == 1) "1 copy" else "${d.copies} copies")
         if (caps.colorSupported && caps.monochromeSupported) add(if (d.color) "Color" else "Black & white")
-        if (caps.canDuplex) add(if (d.twoSided == TwoSided.OFF) "One-sided" else "Two-sided")
+        if (caps.routeFor(d.format) == PrintRoute.PDF && caps.hasDuplex) add(if (d.twoSided == TwoSided.OFF) "One-sided" else "Two-sided")
     }.joinToString(" · ")
 }
 

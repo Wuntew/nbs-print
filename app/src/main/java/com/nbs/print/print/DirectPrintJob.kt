@@ -11,6 +11,7 @@ import com.nbs.print.ipp.IppClient
 import com.nbs.print.ipp.IppException
 import com.nbs.print.ipp.JobTicket
 import com.nbs.print.ipp.PrinterCaps
+import com.nbs.print.ipp.PrintRoute
 import com.nbs.print.ipp.PrinterRef
 import com.nbs.print.layout.Paper
 import com.nbs.print.layout.PrintOptions
@@ -31,6 +32,8 @@ data class DirectParams(
     /** true = color, false = black and white. */
     val color: Boolean = true,
     val twoSided: TwoSided = TwoSided.OFF,
+    /** Force a format, for printers that mishandle the automatic choice; null = automatic. */
+    val format: PrintRoute? = null,
 )
 
 enum class TwoSided(val ipp: String?) {
@@ -41,18 +44,27 @@ enum class TwoSided(val ipp: String?) {
 
 /** Turns the user's choices into what the printer is actually asked for, limited to what it supports. */
 fun buildTicket(paper: Paper, caps: PrinterCaps, params: DirectParams): JobTicket {
+    val route = caps.routeFor(params.format)
     val sides = when {
         // Say "one-sided" outright: a printer whose default is duplex would otherwise print two-sided.
         params.twoSided == TwoSided.OFF -> "one-sided".takeIf { it in caps.sides }
-        caps.canDuplex -> params.twoSided.ipp
+        // Two-sided needs one multi-page document, which only the PDF route provides.
+        route == PrintRoute.PDF && caps.hasDuplex -> params.twoSided.ipp
         else -> null
+    }
+    val scaling = when (route) {
+        // These carry their exact size, so ask the printer not to rescale them.
+        PrintRoute.PDF, PrintRoute.RASTER -> "none".takeIf { caps.scalingNoneSupported }
+        // A JPEG's physical size is up to the printer; asking it to fit the page is the dependable way.
+        PrintRoute.JPEG -> "fit".takeIf { it in caps.printScaling }
+        null -> null
     }
     return JobTicket(
         copies = params.copies.coerceIn(1, caps.copiesMax),
         sides = sides,
         color = if (caps.colorSupported && caps.monochromeSupported) params.color else null,
         media = paper.pwgMedia.takeIf { caps.media.isEmpty() || it in caps.media },
-        scalingNone = caps.scalingNoneSupported,
+        scaling = scaling,
     )
 }
 
@@ -91,9 +103,8 @@ class DirectPrintJob(
         params: DirectParams,
         progress: (DirectProgress) -> Unit,
     ) = withContext(Dispatchers.IO) {
-        if (!caps.canPrint) {
-            throw IppException("This printer accepts neither PDF nor JPEG. Use the Android print dialog for it.")
-        }
+        val route = caps.routeFor(params.format)
+            ?: throw IppException("This printer takes none of PDF, PWG raster or JPEG. Use the Android print dialog for it.")
         val sheet = options.sheetSpec(caps.marginPt)
         val dpi = caps.renderDpi()
         val pxPerPt = RenderDensity.pxPerPt(dpi.toFloat(), sheet)
@@ -107,8 +118,8 @@ class DirectPrintJob(
         val pageWpt = minOf(sheet.widthPt, sheet.heightPt).roundToInt()
         val pageHpt = maxOf(sheet.widthPt, sheet.heightPt).roundToInt()
 
-        fun renderPage(index: Int): Bitmap {
-            val bitmap = doc.render(index, sheet, options, pxPerPt)
+        fun renderPage(index: Int, ppp: Float): Bitmap {
+            val bitmap = doc.render(index, sheet, options, ppp)
             if (!rotate) return bitmap
             val m = Matrix().apply { postRotate(90f) }
             return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, m, true).also { bitmap.recycle() }
@@ -116,39 +127,86 @@ class DirectPrintJob(
 
         val files = ArrayList<File>()
         try {
-            if (caps.canPdf) {
-                val pdf = PdfDocument()
-                val paint = Paint(Paint.FILTER_BITMAP_FLAG)
-                pages.forEachIndexed { n, index ->
-                    currentCoroutineContext().ensureActive()
-                    progress(DirectProgress.Rendering(n, pages.size))
-                    val bitmap = renderPage(index)
-                    val page = pdf.startPage(PdfDocument.PageInfo.Builder(pageWpt, pageHpt, n + 1).create())
-                    page.canvas.drawBitmap(bitmap, null, RectF(0f, 0f, pageWpt.toFloat(), pageHpt.toFloat()), paint)
-                    pdf.finishPage(page)
-                    bitmap.recycle()
-                }
-                val file = File(tmp, "${UUID.randomUUID()}.pdf").also { files += it }
-                file.outputStream().use { pdf.writeTo(it) }
-                pdf.close()
-
-                progress(DirectProgress.Sending)
-                track(client.printJob(printer.uri, jobName, "application/pdf", file, ticket).id)
-            } else {
-                // JPEG route: one job per page (JPEG can't carry several pages).
-                pages.forEachIndexed { n, index ->
-                    currentCoroutineContext().ensureActive()
-                    progress(DirectProgress.Rendering(n, pages.size))
-                    val bitmap = renderPage(index)
-                    val bytes = ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.JPEG, 92, it) }
-                        .toByteArray()
-                    bitmap.recycle()
-                    val file = File(tmp, "${UUID.randomUUID()}.jpg").also { files += it }
-                    file.writeBytes(JpegDensity.stamp(bytes, usedDpi))
+            when (route) {
+                PrintRoute.PDF -> {
+                    val pdf = PdfDocument()
+                    val paint = Paint(Paint.FILTER_BITMAP_FLAG)
+                    pages.forEachIndexed { n, index ->
+                        currentCoroutineContext().ensureActive()
+                        progress(DirectProgress.Rendering(n, pages.size))
+                        val bitmap = renderPage(index, pxPerPt)
+                        val page = pdf.startPage(PdfDocument.PageInfo.Builder(pageWpt, pageHpt, n + 1).create())
+                        page.canvas.drawBitmap(bitmap, null, RectF(0f, 0f, pageWpt.toFloat(), pageHpt.toFloat()), paint)
+                        pdf.finishPage(page)
+                        bitmap.recycle()
+                    }
+                    val file = File(tmp, "${UUID.randomUUID()}.pdf").also { files += it }
+                    file.outputStream().use { pdf.writeTo(it) }
+                    pdf.close()
 
                     progress(DirectProgress.Sending)
-                    track(client.printJob(printer.uri, "$jobName (${n + 1}/${pages.size})", "image/jpeg", file, ticket).id)
-                    file.delete()
+                    track(client.printJob(printer.uri, jobName, "application/pdf", file, ticket).id)
+                }
+
+                PrintRoute.RASTER -> {
+                    // PWG raster states its resolution and paper size in every page header, so the
+                    // printer can't misjudge how big the page is the way it can with a bare JPEG.
+                    val plan = caps.rasterPlan(color = params.color || !caps.colorSupported)
+                        ?: throw IppException("This printer's raster settings aren't usable. Use the Android print dialog for it.")
+                    val rasterPxPerPt = plan.dpi / 72f
+                    val file = File(tmp, "${UUID.randomUUID()}.pwg").also { files += it }
+                    file.outputStream().buffered().use { out ->
+                        out.write(PwgRaster.SYNC)
+                        pages.forEachIndexed { n, index ->
+                            currentCoroutineContext().ensureActive()
+                            progress(DirectProgress.Rendering(n, pages.size))
+                            val bitmap = renderPage(index, rasterPxPerPt)
+                            val spec = PwgRaster.Page(
+                                widthPx = bitmap.width, heightPx = bitmap.height, dpi = plan.dpi,
+                                pageWidthPt = pageWpt, pageHeightPt = pageHpt, gray = plan.gray,
+                                totalPages = pages.size, mediaName = options.paper.pwgMedia,
+                            )
+                            val argb = IntArray(bitmap.width)
+                            PwgRaster.writePage(out, spec) { y, dest ->
+                                bitmap.getPixels(argb, 0, bitmap.width, 0, y, bitmap.width, 1)
+                                if (plan.gray) {
+                                    for (x in argb.indices) dest[x] = luma(argb[x]).toByte()
+                                } else {
+                                    for (x in argb.indices) {
+                                        val c = argb[x]
+                                        dest[x * 3] = (c shr 16).toByte()
+                                        dest[x * 3 + 1] = (c shr 8).toByte()
+                                        dest[x * 3 + 2] = c.toByte()
+                                    }
+                                }
+                            }
+                            bitmap.recycle()
+                        }
+                    }
+                    progress(DirectProgress.Sending)
+                    track(client.printJob(printer.uri, jobName, "image/pwg-raster", file, ticket).id)
+                }
+
+                PrintRoute.JPEG -> {
+                    // One job per page (a JPEG can't carry several). When the printer will fit the image
+                    // to its page, send just the printable area so that "fit" is exactly 1:1.
+                    val cropPt = if (ticket.scaling == "fit") hardwareMarginPt(caps) else 0f
+                    pages.forEachIndexed { n, index ->
+                        currentCoroutineContext().ensureActive()
+                        progress(DirectProgress.Rendering(n, pages.size))
+                        val full = renderPage(index, pxPerPt)
+                        val bitmap = cropped(full, (cropPt * pxPerPt).roundToInt())
+                        val bytes = ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.JPEG, 92, it) }
+                            .toByteArray()
+                        if (bitmap !== full) bitmap.recycle()
+                        full.recycle()
+                        val file = File(tmp, "${UUID.randomUUID()}.jpg").also { files += it }
+                        file.writeBytes(JpegDensity.stamp(bytes, usedDpi))
+
+                        progress(DirectProgress.Sending)
+                        track(client.printJob(printer.uri, "$jobName (${n + 1}/${pages.size})", "image/jpeg", file, ticket).id)
+                        file.delete()
+                    }
                 }
             }
         } finally {
@@ -156,6 +214,22 @@ class DirectPrintJob(
         }
 
         awaitCompletion(printer, pages.size * ticket.copies, progress)
+    }
+
+    /** The unprintable border a printer needs, in points; never less than the usual quarter inch or so. */
+    private fun hardwareMarginPt(caps: PrinterCaps): Float =
+        maxOf(PrintOptions.ASSUMED_PRINTER_MARGIN.left, (caps.marginPt ?: 0f).coerceAtMost(PrintOptions.MAX_HARDWARE_MARGIN_PT))
+
+    private fun cropped(src: Bitmap, marginPx: Int): Bitmap {
+        if (marginPx <= 0 || src.width <= 2 * marginPx || src.height <= 2 * marginPx) return src
+        return Bitmap.createBitmap(src, marginPx, marginPx, src.width - 2 * marginPx, src.height - 2 * marginPx)
+    }
+
+    private fun luma(argb: Int): Int {
+        val r = (argb shr 16) and 0xff
+        val g = (argb shr 8) and 0xff
+        val b = argb and 0xff
+        return (r * 299 + g * 587 + b * 114) / 1000
     }
 
     private fun track(id: Int?) {

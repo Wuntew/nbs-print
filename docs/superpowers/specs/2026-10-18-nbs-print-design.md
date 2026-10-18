@@ -91,7 +91,34 @@ minimal mobile UI on Dribbble. Decision: build **Sheet**, borrowing Dial's **pag
 - **Layout:** portrait stacks everything with Print last; landscape puts the paper and filmstrip left and
   the tiles right with Print pinned. Verified in 3-button and gesture navigation, light and dark.
 
+## v1.2.1: wrong-size printouts on image-only printers (2026-10-18)
+
+**Report:** a PDF page printed with no scaling came out at about a quarter of its size, printing directly
+to a printer.
+
+**Cause:** the printer didn't accept PDF, so the app sent each page as a 300 dpi JPEG with the density in
+the JFIF header. Printers are free to ignore that and print a JPEG at their own native resolution; a
+1200 dpi engine prints 2550 pixels as 2.125 in, 300/1200 = 25%. (The pages the app renders were verified
+exact on Android 13 and 16, in the preview, in the system print dialog and in the output files, so the
+fault was in how the printer read the file, not in the layout.)
+
+**Fix:**
+- New route order: PDF, then **PWG raster**, then JPEG. PWG raster (PWG 5102.4) carries `HWResolution` and
+  `PageSize` in every page header and is mandatory for IPP Everywhere printers. The encoder is ported
+  from CUPS's reference writer (header offsets checked mechanically against the C struct) and verified by
+  round-tripping through a decoder written from CUPS's reader. The printer's own
+  `pwg-raster-document-resolution-supported` and `-type-supported` choose the dpi (nearest 300, within
+  150-400) and sRGB or gray.
+- JPEG, now last: send only the printable area (paper minus hardware margins) with `print-scaling=fit`, so
+  the result doesn't depend on how the printer reads resolution; accurate to a few percent, and the UI says so.
+- **Send as** (Auto / PDF / Raster / JPEG) in the Options sheet when a printer takes several formats, so a
+  misbehaving printer can be worked around without a new release.
+- Two-sided stays PDF-only (raster duplex needs per-printer back-side transforms that can't be tested here).
+- Verified end to end against the mock printer on Android 16 with the signed build: the PWG job decodes to
+  2550x3300 px at 300 dpi = 8.50 x 11.00 in with the 1-inch calibration square exactly 72 pt at (72, 72).
+  Not verified: real printers.
+
 ## Out of scope
 
 Office/web conversion, tiling oversized content across sheets, vector PDF output, password-protected PDFs,
-printer authentication, PWG-raster/URF output.
+printer authentication, URF output, two-sided on the raster route.
