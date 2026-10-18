@@ -9,7 +9,9 @@ import android.graphics.pdf.PdfDocument
 import com.nbs.print.doc.PrintableDoc
 import com.nbs.print.ipp.IppClient
 import com.nbs.print.ipp.IppException
+import com.nbs.print.ipp.IppStatus
 import com.nbs.print.ipp.JobTicket
+import com.nbs.print.ipp.SentJob
 import com.nbs.print.ipp.PrinterCaps
 import com.nbs.print.ipp.PrintRoute
 import com.nbs.print.ipp.PrinterRef
@@ -54,7 +56,7 @@ fun buildTicket(paper: Paper, caps: PrinterCaps, params: DirectParams): JobTicke
     }
     val scaling = when (route) {
         // These carry their exact size, so ask the printer not to rescale them.
-        PrintRoute.PDF, PrintRoute.RASTER -> "none".takeIf { caps.scalingNoneSupported }
+        PrintRoute.PDF, PrintRoute.RASTER, PrintRoute.URF -> "none".takeIf { caps.scalingNoneSupported }
         // A JPEG's physical size is up to the printer; asking it to fit the page is the dependable way.
         PrintRoute.JPEG -> "fit".takeIf { it in caps.printScaling }
         null -> null
@@ -89,6 +91,12 @@ class DirectPrintJob(
     private val context: Context,
     private val client: IppClient,
 ) {
+    private companion object {
+        const val BUSY_RETRY_DELAY_MS = 3_000L
+        const val MAX_BUSY_RETRIES = 100 // about five minutes of waiting for a busy printer
+        const val PAGE_TIMEOUT_MS = 300_000L
+    }
+
     /** Set once the printer accepted the job, so it can be cancelled. */
     @Volatile
     var sentJobId: Int? = null
@@ -145,51 +153,73 @@ class DirectPrintJob(
                     pdf.close()
 
                     progress(DirectProgress.Sending)
-                    track(client.printJob(printer.uri, jobName, "application/pdf", file, ticket).id)
+                    track(submit(printer, jobName, "application/pdf", file, ticket, progress).id)
                 }
 
-                PrintRoute.RASTER -> {
-                    // PWG raster states its resolution and paper size in every page header, so the
-                    // printer can't misjudge how big the page is the way it can with a bare JPEG.
-                    val plan = caps.rasterPlan(color = params.color || !caps.colorSupported)
+                PrintRoute.RASTER, PrintRoute.URF -> {
+                    // Raster pages state their resolution and paper size in every header, so the printer
+                    // can't misjudge how big the page is the way it can with a bare JPEG. The whole
+                    // document is one job, so printers that take one job at a time are fine.
+                    val urf = route == PrintRoute.URF
+                    val wantColor = params.color || !caps.colorSupported
+                    val plan = (if (urf) caps.urfPlan(wantColor) else caps.rasterPlan(wantColor))
                         ?: throw IppException("This printer's raster settings aren't usable. Use the Android print dialog for it.")
-                    val rasterPxPerPt = plan.dpi / 72f
-                    val file = File(tmp, "${UUID.randomUUID()}.pwg").also { files += it }
+                    val k = plan.scale
+                    val renderPpp = plan.renderDpi / 72f
+                    val quality = if (urf) urfQuality(caps) else 0
+                    val file = File(tmp, "${UUID.randomUUID()}.${if (urf) "urf" else "pwg"}").also { files += it }
                     file.outputStream().buffered().use { out ->
-                        out.write(PwgRaster.SYNC)
+                        out.write(if (urf) UrfRaster.fileHeader(pages.size) else PwgRaster.SYNC)
                         pages.forEachIndexed { n, index ->
                             currentCoroutineContext().ensureActive()
                             progress(DirectProgress.Rendering(n, pages.size))
-                            val bitmap = renderPage(index, rasterPxPerPt)
-                            val spec = PwgRaster.Page(
-                                widthPx = bitmap.width, heightPx = bitmap.height, dpi = plan.dpi,
-                                pageWidthPt = pageWpt, pageHeightPt = pageHpt, gray = plan.gray,
-                                totalPages = pages.size, mediaName = options.paper.pwgMedia,
-                            )
+                            val bitmap = renderPage(index, renderPpp)
+                            val bpp = if (plan.gray) 1 else 3
                             val argb = IntArray(bitmap.width)
-                            PwgRaster.writePage(out, spec) { y, dest ->
-                                bitmap.getPixels(argb, 0, bitmap.width, 0, y, bitmap.width, 1)
-                                if (plan.gray) {
-                                    for (x in argb.indices) dest[x] = luma(argb[x]).toByte()
-                                } else {
+                            val source = ByteArray(bitmap.width * bpp)
+                            var loaded = -1
+                            val rowFn = { y: Int, dest: ByteArray ->
+                                val sy = y / k
+                                if (sy != loaded) {
+                                    bitmap.getPixels(argb, 0, bitmap.width, 0, sy, bitmap.width, 1)
                                     for (x in argb.indices) {
                                         val c = argb[x]
-                                        dest[x * 3] = (c shr 16).toByte()
-                                        dest[x * 3 + 1] = (c shr 8).toByte()
-                                        dest[x * 3 + 2] = c.toByte()
+                                        if (plan.gray) {
+                                            source[x] = luma(c).toByte()
+                                        } else {
+                                            source[x * 3] = (c shr 16).toByte()
+                                            source[x * 3 + 1] = (c shr 8).toByte()
+                                            source[x * 3 + 2] = c.toByte()
+                                        }
                                     }
+                                    loaded = sy
                                 }
+                                PwgRaster.expandRow(source, bpp, k, dest)
+                            }
+                            val widthPx = bitmap.width * k
+                            val heightPx = bitmap.height * k
+                            if (urf) {
+                                UrfRaster.writePage(out, UrfRaster.Page(widthPx, heightPx, plan.dpi, plan.gray, quality), rowFn)
+                            } else {
+                                val spec = PwgRaster.Page(
+                                    widthPx = widthPx, heightPx = heightPx, dpi = plan.dpi,
+                                    pageWidthPt = pageWpt, pageHeightPt = pageHpt, gray = plan.gray,
+                                    totalPages = pages.size, mediaName = options.paper.pwgMedia,
+                                )
+                                PwgRaster.writePage(out, spec, rowFn)
                             }
                             bitmap.recycle()
                         }
                     }
                     progress(DirectProgress.Sending)
-                    track(client.printJob(printer.uri, jobName, "image/pwg-raster", file, ticket).id)
+                    track(submit(printer, jobName, if (urf) "image/urf" else "image/pwg-raster", file, ticket, progress).id)
                 }
 
                 PrintRoute.JPEG -> {
-                    // One job per page (a JPEG can't carry several). When the printer will fit the image
-                    // to its page, send just the printable area so that "fit" is exactly 1:1.
+                    // One job per page (a JPEG can't carry several), so wait for each page to finish before
+                    // sending the next: many printers take one job at a time and answer "busy" otherwise.
+                    // When the printer will fit the image to its page, send just the printable area so
+                    // that "fit" is exactly 1:1.
                     val cropPt = if (ticket.scaling == "fit") hardwareMarginPt(caps) else 0f
                     pages.forEachIndexed { n, index ->
                         currentCoroutineContext().ensureActive()
@@ -204,8 +234,14 @@ class DirectPrintJob(
                         file.writeBytes(JpegDensity.stamp(bytes, usedDpi))
 
                         progress(DirectProgress.Sending)
-                        track(client.printJob(printer.uri, "$jobName (${n + 1}/${pages.size})", "image/jpeg", file, ticket).id)
+                        val sent = try {
+                            submit(printer, "$jobName (${n + 1}/${pages.size})", "image/jpeg", file, ticket, progress)
+                        } catch (e: IppException) {
+                            throw pageFailure(n, pages.size, e)
+                        }
+                        track(sent.id)
                         file.delete()
+                        sent.id?.let { awaitPageDone(printer, it, n, pages.size, ticket.copies, progress) }
                     }
                 }
             }
@@ -230,6 +266,72 @@ class DirectPrintJob(
         val g = (argb shr 8) and 0xff
         val b = argb and 0xff
         return (r * 299 + g * 587 + b * 114) / 1000
+    }
+
+    /** Sends a job; if the printer says it's busy (still printing something) waits and tries again. */
+    private suspend fun submit(
+        printer: PrinterRef,
+        jobName: String,
+        mime: String,
+        file: File,
+        ticket: JobTicket,
+        progress: (DirectProgress) -> Unit,
+    ): SentJob {
+        var tries = 0
+        while (true) {
+            try {
+                return client.printJob(printer.uri, jobName, mime, file, ticket)
+            } catch (e: IppException) {
+                if (!IppStatus.isRetryable(e.statusCode) || ++tries > MAX_BUSY_RETRIES) throw e
+                progress(DirectProgress.Printing("Waiting for the printer to be ready…"))
+                delay(BUSY_RETRY_DELAY_MS)
+                currentCoroutineContext().ensureActive()
+            }
+        }
+    }
+
+    /** Waits until page [n] has printed (printers that forget jobs or can't report status count as done). */
+    private suspend fun awaitPageDone(
+        printer: PrinterRef,
+        id: Int,
+        n: Int,
+        total: Int,
+        copies: Int,
+        progress: (DirectProgress) -> Unit,
+    ) {
+        val deadline = System.currentTimeMillis() + PAGE_TIMEOUT_MS
+        while (System.currentTimeMillis() < deadline) {
+            val status = try {
+                client.jobStatus(printer.uri, id)
+            } catch (_: IppException) {
+                return
+            }
+            if (status.isCompleted) return
+            if (status.isFinished) {
+                throw IppException("The printer ${if (status.state == 7) "canceled" else "aborted"} page ${n + 1} of $total.")
+            }
+            val reasons = status.reasons.mapNotNull { PrinterCaps.reasonText(it.removeSuffix("-error")) }
+            val done = n * copies + (status.impressionsCompleted ?: 0).coerceAtMost(copies)
+            progress(DirectProgress.Printing("Page ${n + 1} of $total · ${statusText(status.state, reasons)}", done, total * copies))
+            delay(2_000)
+            currentCoroutineContext().ensureActive()
+        }
+    }
+
+    private fun pageFailure(n: Int, total: Int, e: IppException): IppException {
+        val already = when (n) {
+            0 -> ""
+            1 -> " The first page was already sent to the printer."
+            else -> " The first $n pages were already sent to the printer."
+        }
+        return IppException("Page ${n + 1} of $total couldn't be sent. ${e.message}$already", e, e.statusCode)
+    }
+
+    /** AirPrint print quality: 4 (normal) if the printer lists it, else its first listed value, else 0 = its default. */
+    private fun urfQuality(caps: PrinterCaps): Int {
+        val levels = caps.urfSupported.filter { it.startsWith("PQ") }
+            .flatMap { it.removePrefix("PQ").split('-').mapNotNull(String::toIntOrNull) }
+        return if (4 in levels) 4 else levels.firstOrNull() ?: 0
     }
 
     private fun track(id: Int?) {

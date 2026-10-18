@@ -76,25 +76,48 @@ object PwgRaster {
      */
     fun writePage(out: OutputStream, p: Page, row: (y: Int, dest: ByteArray) -> Unit) {
         out.write(header(p))
-        val n = p.bytesPerLine
-        val bpp = p.bytesPerPixel
-        val buf = ByteArray(n)
+        writeLines(out, p.heightPx, p.bytesPerLine, p.bytesPerPixel, row)
+    }
+
+    /**
+     * The compressed rows shared by PWG and Apple (URF) raster: identical neighbouring rows collapse
+     * into one line with a repeat count of up to 256.
+     */
+    internal fun writeLines(out: OutputStream, heightPx: Int, bytesPerLine: Int, bpp: Int, row: (y: Int, dest: ByteArray) -> Unit) {
+        val buf = ByteArray(bytesPerLine)
         var pending: ByteArray? = null
         var count = 0
-        for (y in 0 until p.heightPx) {
+        for (y in 0 until heightPx) {
             row(y, buf)
             val prev = pending
             if (prev != null && count < 256 && buf.contentEquals(prev)) {
                 count++ // identical to the previous row: just bump its repeat count
             } else {
                 if (prev != null) encodeLine(out, prev, bpp, count)
-                val keep = prev ?: ByteArray(n)
-                System.arraycopy(buf, 0, keep, 0, n)
+                val keep = prev ?: ByteArray(bytesPerLine)
+                System.arraycopy(buf, 0, keep, 0, bytesPerLine)
                 pending = keep
                 count = 1
             }
         }
         pending?.let { encodeLine(out, it, bpp, count) }
+    }
+
+    /** Repeats every pixel of [src] [k] times across (for printers that want a higher dpi than we drew at). */
+    fun expandRow(src: ByteArray, bpp: Int, k: Int, dest: ByteArray) {
+        if (k == 1) {
+            System.arraycopy(src, 0, dest, 0, src.size)
+            return
+        }
+        var out = 0
+        var inPos = 0
+        while (inPos < src.size) {
+            repeat(k) {
+                System.arraycopy(src, inPos, dest, out, bpp)
+                out += bpp
+            }
+            inPos += bpp
+        }
     }
 
     /** One line: (repeat - 1), then runs. A run is (n < 128: n+1 copies of the next pixel) or (n >= 129: 257-n literal pixels). */
@@ -142,5 +165,49 @@ object PwgRaster {
                 out.write(pixels, start, count * bpp)
             }
         }
+    }
+}
+
+/**
+ * Apple raster (URF, "image/urf"): what AirPrint printers take. A multi-page job, like PWG raster, with
+ * the resolution in each page header, and the same compressed rows. Layout and field meanings come from
+ * the Apple branch of CUPS's raster writer (cups/raster-stream.c).
+ */
+object UrfRaster {
+    const val PAGE_HEADER_SIZE = 32
+    private val MAGIC = "UNIRAST\u0000".toByteArray(Charsets.ISO_8859_1)
+
+    class Page(
+        val widthPx: Int,
+        val heightPx: Int,
+        val dpi: Int,
+        val gray: Boolean,
+        /** 3 draft, 4 normal, 5 high; 0 lets the printer decide. */
+        val quality: Int = 0,
+    ) {
+        val bytesPerPixel get() = if (gray) 1 else 3
+        val bytesPerLine get() = widthPx * bytesPerPixel
+    }
+
+    /** "UNIRAST\0" followed by the number of pages (big-endian). */
+    fun fileHeader(pageCount: Int): ByteArray =
+        ByteBuffer.allocate(12).order(ByteOrder.BIG_ENDIAN).put(MAGIC).putInt(pageCount).array()
+
+    fun pageHeader(p: Page): ByteArray {
+        val b = ByteBuffer.allocate(PAGE_HEADER_SIZE).order(ByteOrder.BIG_ENDIAN)
+        b.put(0, (8 * p.bytesPerPixel).toByte())     // bits per pixel
+        b.put(1, (if (p.gray) 4 else 1).toByte())    // colorspace: 1 sRGB, 4 device gray
+        b.put(2, 1)                                   // 1 = one-sided
+        b.put(3, p.quality.toByte())                  // print quality
+        // [4] media type and [5] input slot stay 0 = auto
+        b.putInt(12, p.widthPx)
+        b.putInt(16, p.heightPx)
+        b.putInt(20, p.dpi)
+        return b.array()
+    }
+
+    fun writePage(out: OutputStream, p: Page, row: (y: Int, dest: ByteArray) -> Unit) {
+        out.write(pageHeader(p))
+        PwgRaster.writeLines(out, p.heightPx, p.bytesPerLine, p.bytesPerPixel, row)
     }
 }

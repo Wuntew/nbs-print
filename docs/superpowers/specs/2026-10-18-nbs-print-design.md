@@ -118,7 +118,34 @@ fault was in how the printer read the file, not in the layout.)
   2550x3300 px at 300 dpi = 8.50 x 11.00 in with the 1-inch calibration square exactly 72 pt at (72, 72).
   Not verified: real printers.
 
+## v1.2.2: multi-page jobs failing with "0x0507" on Canon PIXMA (2026-10-18)
+
+**Report:** printing 40 pages directly to a Canon MG3600 series printed page 1, then showed
+"Couldn't print / 0x0507: Not allowed to print".
+
+**Cause (inferred from the symptom; the printer itself was not available):** IPP status 0x0507 is
+`server-error-busy` (RFC 8011), not "not allowed". Canon PIXMA inkjets advertise AirPrint raster and JPEG but
+no PDF, so the app fell to the JPEG route, which sends one job per page. The printer refused the second job
+because the first was still printing. The error text was also wrong: the status table had the 0x05xx codes
+misnamed.
+
+**Fix:**
+- Status names corrected to RFC 8011; busy and temporary-error replies are retried every 3 s (up to 100
+  times) with "Waiting for the printer to be ready...".
+- JPEG route is sequential: submit a page, poll the job until it completes, then submit the next, with
+  progress "Page n of N". A failure says which page failed and that earlier pages were already sent.
+- New **AirPrint raster (URF)** route, tried after PWG raster and before JPEG: one multi-page job. Encoder is
+  the same PackBits-style row coding as PWG raster with Apple's 12-byte file header and 32-byte page headers
+  (ported from CUPS). Printers listing only 600 or 1200 dpi get a 300 dpi render with each pixel repeated, so
+  header and size stay truthful without a huge bitmap.
+- Sockets prefer the Wi-Fi network but fall back to the default route if connecting fails (never after a
+  request was sent, so a job is never duplicated).
+- **Printer details** disclosure in Options with Copy, to diagnose printers remotely.
+- Verified against the mock on Android 16: a `--jpeg-only --one-at-a-time` printer received all 5 pages
+  sequentially with progress; a `--urf-only --one-at-a-time` printer received a single 5-page URF job that
+  decodes to 2550x3300 px at 300 dpi. Not verified: the real Canon (unknown which formats it lists).
+
 ## Out of scope
 
 Office/web conversion, tiling oversized content across sheets, vector PDF output, password-protected PDFs,
-printer authentication, URF output, two-sided on the raster route.
+printer authentication, two-sided on the raster routes.

@@ -327,15 +327,16 @@ internal fun OptionsSheet(state: UiState, onDirect: ((DirectParams) -> DirectPar
     }
 
     when (route) {
-        PrintRoute.RASTER -> if (caps.hasDuplex) {
+        PrintRoute.RASTER, PrintRoute.URF -> if (caps.hasDuplex) {
             Spacer(Modifier.height(14.dp))
             Hint("Pages go to this printer as images, so two-sided isn't available. Choose PDF above if it offers it.")
         }
         PrintRoute.JPEG -> {
             Spacer(Modifier.height(14.dp))
             Hint(
-                "This printer only takes JPEG pictures. They can't state a physical size, so pages go one at a time, " +
-                    "copies come out uncollated, and the size may be off by a few percent."
+                "This printer only takes JPEG pictures, which can't state a physical size. Pages are sent one at a " +
+                    "time, so keep NBS Print open until the last one is out. Copies come out uncollated and the size " +
+                    "may be off by a few percent."
             )
         }
         else -> {}
@@ -343,6 +344,40 @@ internal fun OptionsSheet(state: UiState, onDirect: ((DirectParams) -> DirectPar
     if (route != PrintRoute.JPEG && !caps.scalingNoneSupported) {
         Spacer(Modifier.height(10.dp))
         Hint("This printer can't be told to skip its own scaling, so output may be slightly resized. The Android print dialog may behave differently.")
+    }
+
+    PrinterDetails(caps.diagnostics(route))
+}
+
+/** What the printer reports, tucked away; the Copy button is for sending it along when something misbehaves. */
+@Composable
+private fun PrinterDetails(text: String) {
+    var open by remember { mutableStateOf(false) }
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    Spacer(Modifier.height(20.dp))
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(role = Role.Button) { open = !open }
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Micro(if (open) "Hide printer details" else "Printer details", Modifier.weight(1f))
+    }
+    if (open) {
+        Text(
+            text,
+            style = Type.caption.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 11.sp, lineHeight = 15.sp),
+            color = palette.ink,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(palette.ground)
+                .padding(12.dp),
+        )
+        Spacer(Modifier.height(8.dp))
+        GhostPill("Copy details", { clipboard.setText(androidx.compose.ui.text.AnnotatedString(text)) }, Modifier.fillMaxWidth())
     }
 }
 

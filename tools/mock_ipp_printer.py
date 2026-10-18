@@ -8,8 +8,8 @@ the app sent.
     python tools/mock_ipp_printer.py --port 8631 --out scratch/jobs
 
 From the Android emulator the host machine is 10.0.2.2, so add the printer in the app as
-"10.0.2.2:8631". Flags simulate awkward printers: --jpeg-only, --raster-only, --engine-dpi 1200, --ipp11, --no-scaling-attr,
---reason media-empty-error, --abort-jobs, --polls 30 (slow), --report-pages.
+"10.0.2.2:8631". Flags simulate awkward printers: --jpeg-only, --raster-only, --urf-only, --engine-dpi 1200, --ipp11, --no-scaling-attr,
+--reason media-empty-error, --abort-jobs, --polls 30 (slow), --report-pages, --one-at-a-time.
 """
 import argparse
 import json
@@ -90,6 +90,8 @@ class Printer:
         a = self.args
         if a.jpeg_only:
             formats = ["image/jpeg", "image/urf"]
+        elif a.urf_only:
+            formats = ["image/urf", "image/jpeg"]
         elif a.raster_only:
             formats = ["image/pwg-raster", "image/jpeg", "image/urf"]
         else:
@@ -109,6 +111,8 @@ class Printer:
         if not a.no_scaling_attr:
             out += multi(KEYWORD, "print-scaling-supported", ["auto", "fill", "fit", "none"])
         out += attr(RES, "printer-resolution-supported", i32(a.engine_dpi) + i32(a.engine_dpi) + b"\x03")
+        if "image/urf" in formats and not a.jpeg_only:
+            out += multi(KEYWORD, "urf-supported", ["V1.4", "CP1", "PQ3-4-5", "RS300-600", "SRGB24", "W8", "DM1"])
         if "image/pwg-raster" in formats and not a.jpeg_only:
             out += multi(KEYWORD, "pwg-raster-document-type-supported", ["sgray_8", "srgb_8"])
             out += attr(RES, "pwg-raster-document-resolution-supported", i32(300) + i32(300) + b"\x03")
@@ -139,8 +143,18 @@ class Printer:
             return header(0) + opgrp + bytes([TAG_PRINTER]) + self.printer_attributes() + bytes([TAG_END])
 
         if op == 0x0002:  # Print-Job
+            if self.args.one_at_a_time:
+                # Like many consumer inkjets: refuse a new job while an earlier one is still printing.
+                with self.lock:
+                    busy = any(not j["canceled"] and j["polls"] < self.args.polls for j in self.jobs.values())
+                if busy:
+                    print("[mock] busy: refusing a job while another is printing", flush=True)
+                    refusal = bytes([TAG_OP]) + attr(CHARSET, "attributes-charset", "utf-8") + \
+                        attr(LANG, "attributes-natural-language", "en") + \
+                        attr(TEXT, "status-message", "Not allowed to print")
+                    return header(0x0507) + refusal + bytes([TAG_END])
             fmt = opattrs.get("document-format", ["application/octet-stream"])[0]
-            ext = {"application/pdf": "pdf", "image/jpeg": "jpg", "image/pwg-raster": "pwg"}.get(fmt, "bin")
+            ext = {"application/pdf": "pdf", "image/jpeg": "jpg", "image/pwg-raster": "pwg", "image/urf": "urf"}.get(fmt, "bin")
             with self.lock:
                 job_id = self.next_job
                 self.next_job += 1
@@ -220,11 +234,14 @@ if __name__ == "__main__":
     ap.add_argument("--out", default="scratch/jobs")
     ap.add_argument("--jpeg-only", action="store_true", help="only advertise JPEG (and URF), no PDF or PWG raster")
     ap.add_argument("--raster-only", action="store_true", help="advertise PWG raster and JPEG but no PDF (like many Brother and Epson printers)")
+    ap.add_argument("--urf-only", action="store_true", help="advertise AirPrint raster (URF) and JPEG but no PDF or PWG raster (like Canon PIXMA inkjets)")
     ap.add_argument("--engine-dpi", type=int, default=600, help="the printer's native resolution, e.g. 1200")
     ap.add_argument("--ipp11", action="store_true", help="reject IPP 2.0 requests, accept 1.1 only")
     ap.add_argument("--no-scaling-attr", action="store_true", help="don't advertise print-scaling-supported")
     ap.add_argument("--reason", help="printer-state-reasons to report, e.g. media-empty-error")
     ap.add_argument("--polls", type=int, default=2, help="status polls before a job reports completed (slow printer)")
+    ap.add_argument("--one-at-a-time", action="store_true",
+                    help="answer 0x0507 (busy) to a new job while an earlier one is still printing (use with --polls)")
     ap.add_argument("--report-pages", action="store_true", help="report job-impressions-completed while printing")
     ap.add_argument("--abort-jobs", action="store_true", help="report every job as aborted")
     args = ap.parse_args()

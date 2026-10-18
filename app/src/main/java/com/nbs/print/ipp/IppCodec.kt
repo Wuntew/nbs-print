@@ -41,9 +41,15 @@ object IppStatus {
     /** Anything below 0x0100 is a success (possibly with substituted attributes). */
     fun isSuccess(code: Int) = code < 0x0100
     const val VERSION_NOT_SUPPORTED = 0x0503
+    const val TEMPORARY_ERROR = 0x0505
+    const val BUSY = 0x0507
+
+    /** The printer is occupied (typically still printing another job) and wants us to try again shortly. */
+    fun isRetryable(code: Int?) = code == BUSY || code == TEMPORARY_ERROR
 }
 
-class IppException(message: String, cause: Throwable? = null) : Exception(message, cause)
+/** [statusCode] is the IPP status the printer answered with, when the failure came from one. */
+class IppException(message: String, cause: Throwable? = null, val statusCode: Int? = null) : Exception(message, cause)
 
 sealed interface IppValue {
     data class Integer(val value: Int, val isEnum: Boolean = false) : IppValue

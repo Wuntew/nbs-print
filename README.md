@@ -50,17 +50,22 @@ How it works: the app speaks IPP, the standard network-printing protocol, and se
 the preview in the most dependable format the printer accepts:
 
 1. **PDF**, when the printer takes it. One document, so two-sided printing works too.
-2. **PWG raster**, when it doesn't. Every IPP Everywhere / AirPrint / Mopria printer must accept this
-   format, and its header states the exact resolution and paper size, so the printer can't misjudge how
-   big the page is. (Two-sided isn't available on this route.)
-3. **JPEG**, only as a last resort. A JPEG can't reliably carry a physical size: a printer may print each
+2. **PWG raster**, when it doesn't. Every IPP Everywhere / Mopria printer must accept this format, and
+   its header states the exact resolution and paper size, so the printer can't misjudge how big the page
+   is. (Two-sided isn't available on this route.)
+3. **AirPrint raster (URF)**, for printers that list only that, such as many Canon PIXMA inkjets. Same idea
+   as PWG raster: one multi-page job with the resolution stated in each page header.
+4. **JPEG**, only as a last resort. A JPEG can't reliably carry a physical size: a printer may print each
    pixel at its own native resolution and ignore the file's stated dpi, which can shrink a page to a
    quarter of its size. So the app sends just the printable area and asks the printer to fit it to the
-   page, which keeps sizes within a few percent.
+   page, which keeps sizes within a few percent. JPEG jobs are one page each, so the app sends a page,
+   waits for the printer to finish it, then sends the next (and retries while the printer says it is busy).
+   Keep NBS Print open until a JPEG job finishes.
 
 Where the printer allows it the job is also marked "don't rescale", so 100% stays 100%. If a printout ever
 comes out the wrong size, open **Options → Send as** and try another format (shown only when the printer
-accepts more than one).
+accepts more than one). **Options → Printer details** shows what the printer reports and which format is
+used, with a Copy button for bug reports.
 
 Direct printing needs a printer that supports IPP on the local network. Most Wi-Fi and Ethernet printers
 from the last decade do. Printers that require a login aren't supported yet. Because printers are addressed
@@ -115,9 +120,11 @@ From the Android emulator the host is `10.0.2.2`, so add the printer as `10.0.2.
 awkward printers: `--jpeg-only`, `--ipp11`, `--no-scaling-attr`, `--reason media-empty-error`,
 `--abort-jobs`, `--polls 40` (a slow printer, for testing Cancel), `--report-pages` (reports the
 printer's page count while printing, for the progress ring), and `--raster-only --engine-dpi 1200`
-(a printer that takes PWG raster and JPEG but no PDF, with a 1200 dpi engine).
+(a printer that takes PWG raster and JPEG but no PDF, with a 1200 dpi engine), `--urf-only` (AirPrint raster
+and JPEG, like Canon PIXMA inkjets) and `--one-at-a-time` (refuses a new job with "busy" while one is
+printing).
 
-`tools/decode_pwg.py` decodes a saved raster job and measures it, for example
+`tools/decode_pwg.py` decodes a saved PWG or URF raster job and measures it, for example
 `python tools/decode_pwg.py scratch/jobs/job-1.pwg --probe 72 72 72 72` reports the page's size in inches
 and the first dark box in points. Its decoder is written from CUPS's reference reader, separately from the
 app's encoder, so it is a genuine cross-check.

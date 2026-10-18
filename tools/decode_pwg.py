@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Decode a PWG raster file (image/pwg-raster) and report what a printer would see.
+"""Decode a PWG raster (image/pwg-raster) or Apple raster (image/urf) file and report what a printer would see.
 
     python tools/decode_pwg.py job-1.pwg            # print each page's header summary
     python tools/decode_pwg.py job-1.pwg --png out  # also write out-1.png, out-2.png, ...
@@ -16,9 +16,53 @@ import zlib
 HEADER = 1796
 
 
+def read_lines(data, pos, height, per_line, bpp):
+    """Decode `height` rows of CUPS-style PackBits rows starting at `pos`; returns (rows, new_pos)."""
+    rows = []
+    while len(rows) < height:
+        repeat = data[pos] + 1
+        pos += 1
+        line = bytearray()
+        while len(line) < per_line:
+            n = data[pos]
+            pos += 1
+            if n == 128:  # clear to end of line (white for rgb/gray)
+                line.extend(b"\xff" * (per_line - len(line)))
+            elif n & 128:  # literal pixels
+                count = (257 - n) * bpp
+                line.extend(data[pos:pos + count])
+                pos += count
+            else:  # repeat one pixel
+                px = data[pos:pos + bpp]
+                pos += bpp
+                line.extend(px * (n + 1))
+        rows.extend([bytes(line[:per_line])] * repeat)
+    return rows[:height], pos
+
+
+def read_urf_pages(data):
+    """Apple raster: "UNIRAST\\0", page count, then 32-byte page headers (see CUPS's Apple writer)."""
+    count = struct.unpack(">I", data[8:12])[0]
+    pos = 12
+    for _ in range(count):
+        h = data[pos:pos + 32]
+        pos += 32
+        bits, cspace, duplex, quality = h[0], h[1], h[2], h[3]
+        width, height, dpi = struct.unpack(">III", h[12:24])
+        bpp = bits // 8
+        hdr = dict(media_class="URF", dpi=(dpi, dpi), page_pts=(round(width * 72 / dpi), round(height * 72 / dpi)),
+                   width=width, height=height, bits_per_color=8, bits_per_pixel=bits, bytes_per_line=width * bpp,
+                   color_space=cspace, num_colors=bpp, total_pages=count, media="quality %d, duplex %d" % (quality, duplex))
+        rows, pos = read_lines(data, pos, height, width * bpp, bpp)
+        yield hdr, rows, bpp
+
+
 def read_pages(data):
+    if data[:8] == b"UNIRAST\x00":
+        yield from read_urf_pages(data)
+        return
     if data[:4] != b"RaS2":
-        raise SystemExit("not a PWG raster file (missing RaS2 sync word)")
+        raise SystemExit("not a PWG raster (RaS2) or Apple raster (UNIRAST) file")
     pos = 4
     while pos < len(data):
         h = data[pos:pos + HEADER]
@@ -35,27 +79,8 @@ def read_pages(data):
         )
         bpp = max(1, (hdr["bits_per_pixel"] + 7) // 8)
         per_line = hdr["bytes_per_line"]
-        rows = []
-        while len(rows) < hdr["height"]:
-            repeat = data[pos] + 1
-            pos += 1
-            line = bytearray()
-            while len(line) < per_line:
-                n = data[pos]
-                pos += 1
-                if n == 128:  # clear to end of line (white for rgb/gray)
-                    line.extend(b"\xff" * (per_line - len(line)))
-                elif n & 128:  # literal pixels
-                    count = (257 - n) * bpp
-                    line.extend(data[pos:pos + count])
-                    pos += count
-                else:  # repeat one pixel
-                    px = data[pos:pos + bpp]
-                    pos += bpp
-                    line.extend(px * (n + 1))
-            line = bytes(line[:per_line])
-            rows.extend([line] * repeat)
-        yield hdr, rows[:hdr["height"]], bpp
+        rows, pos = read_lines(data, pos, hdr["height"], per_line, bpp)
+        yield hdr, rows, bpp
 
 
 def write_png(path, hdr, rows, bpp):
