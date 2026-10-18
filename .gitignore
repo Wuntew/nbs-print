@@ -1,0 +1,16 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.kotlin/
+.remember/
+captures/
+
+# Signing material must never be committed
+keystore.properties
+*.jks
+*.keystore
+
+# Scratch output from emulator checks
+/scratch/
