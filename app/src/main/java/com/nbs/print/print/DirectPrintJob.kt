@@ -55,10 +55,13 @@ fun buildTicket(paper: Paper, caps: PrinterCaps, params: DirectParams): JobTicke
         else -> null
     }
     val scaling = when (route) {
-        // These carry their exact size, so ask the printer not to rescale them.
-        PrintRoute.PDF, PrintRoute.RASTER, PrintRoute.URF -> "none".takeIf { caps.scalingNoneSupported }
-        // A JPEG's physical size is up to the printer; asking it to fit the page is the dependable way.
-        PrintRoute.JPEG -> "fit".takeIf { it in caps.printScaling }
+        // A PDF carries its exact size, so ask the printer not to rescale it.
+        PrintRoute.PDF -> "none".takeIf { caps.scalingNoneSupported }
+        // Image routes: a printer is free to rescale an image to its printable area whatever the header says
+        // (a Canon printed a full-page raster about 10% small). So the page is cut down to the printable area
+        // and the printer is asked to fit it, which is 1:1 whether or not the printer rescales.
+        PrintRoute.RASTER, PrintRoute.URF, PrintRoute.JPEG ->
+            "fit".takeIf { it in caps.printScaling } ?: "none".takeIf { caps.scalingNoneSupported && route != PrintRoute.JPEG }
         null -> null
     }
     return JobTicket(
@@ -166,6 +169,7 @@ class DirectPrintJob(
                         ?: throw IppException("This printer's raster settings aren't usable. Use the Android print dialog for it.")
                     val k = plan.scale
                     val renderPpp = plan.renderDpi / 72f
+                    val cropPt = if (ticket.scaling == "fit") hardwareMarginPt(caps) else 0f
                     val quality = if (urf) urfQuality(caps) else 0
                     val file = File(tmp, "${UUID.randomUUID()}.${if (urf) "urf" else "pwg"}").also { files += it }
                     file.outputStream().buffered().use { out ->
@@ -173,7 +177,8 @@ class DirectPrintJob(
                         pages.forEachIndexed { n, index ->
                             currentCoroutineContext().ensureActive()
                             progress(DirectProgress.Rendering(n, pages.size))
-                            val bitmap = renderPage(index, renderPpp)
+                            val full = renderPage(index, renderPpp)
+                            val bitmap = cropped(full, (cropPt * renderPpp).roundToInt())
                             val bpp = if (plan.gray) 1 else 3
                             val argb = IntArray(bitmap.width)
                             val source = ByteArray(bitmap.width * bpp)
@@ -203,12 +208,14 @@ class DirectPrintJob(
                             } else {
                                 val spec = PwgRaster.Page(
                                     widthPx = widthPx, heightPx = heightPx, dpi = plan.dpi,
-                                    pageWidthPt = pageWpt, pageHeightPt = pageHpt, gray = plan.gray,
+                                    pageWidthPt = (widthPx * 72f / plan.dpi).roundToInt(),
+                                    pageHeightPt = (heightPx * 72f / plan.dpi).roundToInt(), gray = plan.gray,
                                     totalPages = pages.size, mediaName = options.paper.pwgMedia,
                                 )
                                 PwgRaster.writePage(out, spec, rowFn)
                             }
-                            bitmap.recycle()
+                            if (bitmap !== full) bitmap.recycle()
+                            full.recycle()
                         }
                     }
                     progress(DirectProgress.Sending)

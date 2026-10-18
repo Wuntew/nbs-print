@@ -158,6 +158,21 @@ The exact reason is unknown (the printer wasn't available).
 `print-scaling=fit`) is the route with real-printer evidence of true size, and 1.2.2 already made it work for
 many pages by sending one page at a time. AirPrint raster stays available under Options > Send as.
 
+## v1.2.4: one sizing rule for every image route (2026-10-18)
+
+**Requirement (user):** a page must print at the true size 1.2.1 gave on the Canon, whichever "Send as" is
+selected and however many pages are printed.
+
+**Cause:** 1.2.1's JPEG route is cut to the printable area and sent with `print-scaling=fit`, and was right
+on the Canon. 1.2.2 and 1.2.3 let PWG raster and AirPrint raster be sent as full pages with "none" and trusted
+the printer; the Canon rescaled them (about 0.9).
+
+**Fix:** JPEG, PWG raster and AirPrint raster all use the same rule: crop the rendered sheet by the printer's
+hardware margin, send `print-scaling=fit` if listed, else "none" (JPEG: nothing). The raster page header
+states the cropped size. Route order PDF, JPEG, PWG raster, AirPrint (JPEG has real-printer evidence).
+Verified on the mock: JPEG, PWG and URF jobs for a two-page file all decode to 2450x3200 px at 300 dpi
+(8.17 x 10.67 in) with the 1 inch square exactly 72 pt at (60, 60). Not verified: the real Canon.
+
 ## Out of scope
 
 Office/web conversion, tiling oversized content across sheets, vector PDF output, password-protected PDFs,

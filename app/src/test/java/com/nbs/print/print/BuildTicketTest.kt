@@ -83,25 +83,30 @@ class BuildTicketTest {
 
     @Test
     fun scalingDependsOnTheRoute() {
-        // PDF and raster state their size: ask for no rescaling, if the printer can be told.
+        // PDF states its size: ask for no rescaling, if the printer can be told.
         assertEquals("none", buildTicket(Paper.LETTER, caps(), DirectParams()).scaling)
-        assertEquals("none", buildTicket(Paper.LETTER, caps(formats = rasterOnly), DirectParams()).scaling)
         assertNull(buildTicket(Paper.LETTER, caps(printScaling = emptySet()), DirectParams()).scaling)
-        // A JPEG's size is up to the printer, so ask it to fit the page instead.
+        // Image routes (JPEG, PWG raster, AirPrint) are cut to the printable area and asked to fit, so every
+        // route gives the same size.
+        assertEquals("fit", buildTicket(Paper.LETTER, caps(formats = rasterOnly), DirectParams()).scaling)
+        assertEquals("fit", buildTicket(Paper.LETTER, caps(formats = urfOnly, urfSupported = urfTokens), DirectParams()).scaling)
         assertEquals("fit", buildTicket(Paper.LETTER, caps(formats = jpegOnly), DirectParams()).scaling)
+        // Raster without a fit option falls back to none; JPEG then sends nothing.
+        assertEquals("none", buildTicket(Paper.LETTER, caps(formats = rasterOnly, printScaling = setOf("none")), DirectParams()).scaling)
         assertNull(buildTicket(Paper.LETTER, caps(formats = jpegOnly, printScaling = setOf("none")), DirectParams()).scaling)
     }
 
     // ---- choosing how to send ----------------------------------------------------------------
 
     @Test
-    fun routesAreOrderedPdfThenRasterThenJpegThenAirPrint() {
+    fun routesAreOrderedPdfThenJpegThenRasters() {
         val all = caps(formats = pdfOnly + rasterOnly + urfOnly + jpegOnly, urfSupported = urfTokens)
-        assertEquals(listOf(PrintRoute.PDF, PrintRoute.RASTER, PrintRoute.JPEG, PrintRoute.URF), all.routes)
+        assertEquals(listOf(PrintRoute.PDF, PrintRoute.JPEG, PrintRoute.RASTER, PrintRoute.URF), all.routes)
         assertEquals(PrintRoute.JPEG, caps(formats = urfOnly + jpegOnly, urfSupported = urfTokens).routeFor(null))
         assertEquals(PrintRoute.URF, caps(formats = urfOnly, urfSupported = urfTokens).routeFor(null))
         assertEquals(PrintRoute.URF, caps(formats = urfOnly + jpegOnly, urfSupported = urfTokens).routeFor(PrintRoute.URF))
-        assertEquals(PrintRoute.RASTER, caps(formats = rasterOnly + jpegOnly).routeFor(null))
+        assertEquals(PrintRoute.JPEG, caps(formats = rasterOnly + jpegOnly).routeFor(null))
+        assertEquals(PrintRoute.RASTER, caps(formats = rasterOnly).routeFor(null))
         assertEquals(PrintRoute.JPEG, caps(formats = jpegOnly).routeFor(null))
         assertNull(caps(formats = setOf("application/octet-stream")).routeFor(null))
         assertTrue(!caps(formats = emptySet()).canPrint)
@@ -153,7 +158,7 @@ class BuildTicketTest {
         assertEquals(setOf("sgray_8", "srgb_8"), c.rasterTypes)
         assertEquals(listOf(300), c.rasterDpis)
         assertEquals(setOf("auto", "fit", "none"), c.printScaling)
-        assertEquals(listOf(PrintRoute.RASTER, PrintRoute.JPEG), c.routes)
+        assertEquals(listOf(PrintRoute.JPEG, PrintRoute.RASTER), c.routes)
     }
 
     // ---- AirPrint (URF) ----------------------------------------------------------------------
@@ -189,9 +194,9 @@ class BuildTicketTest {
     }
 
     @Test
-    fun urfRouteStatesItsSizeSoPrintScalingIsNone() {
+    fun urfRouteIsAskedToFitLikeTheOtherImageRoutes() {
         val c = caps(formats = urfOnly, urfSupported = urfTokens)
-        assertEquals("none", buildTicket(Paper.LETTER, c, DirectParams()).scaling)
+        assertEquals("fit", buildTicket(Paper.LETTER, c, DirectParams()).scaling)
         assertNull(buildTicket(Paper.LETTER, c, DirectParams(twoSided = TwoSided.LONG_EDGE)).sides)
     }
 

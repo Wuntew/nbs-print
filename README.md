@@ -49,22 +49,21 @@ You can cancel at any point.
 How it works: the app speaks IPP, the standard network-printing protocol, and sends the pages you see in
 the preview in the most dependable format the printer accepts:
 
-1. **PDF**, when the printer takes it. One document, so two-sided printing works too.
-2. **PWG raster**, when it doesn't. Every IPP Everywhere / Mopria printer must accept this format, and
-   its header states the exact resolution and paper size, so the printer can't misjudge how big the page
-   is. (Two-sided isn't available on this route.)
-3. **JPEG**, for printers with no PDF or PWG raster, such as many Canon PIXMA inkjets. A JPEG can't
-   reliably carry a physical size: a printer may print each pixel at its own native resolution and ignore
-   the file's stated dpi, which can shrink a page to a quarter of its size. So the app sends just the
-   printable area and asks the printer to fit it to the page, which keeps sizes within a few percent. This
-   is the route proven to print at true size on a real Canon. JPEG jobs are one page each, so the app sends
-   a page, waits for the printer to finish it, then sends the next (and retries while the printer says it is
-   busy). Keep NBS Print open until a JPEG job finishes.
-4. **AirPrint raster (URF)**, one multi-page job with the resolution in each page header. Used only when a
-   printer takes nothing else, or if you pick it under Options → Send as. On one real Canon it printed
-   about 10% small, so it is not the automatic choice.
+1. **PDF**, when the printer takes it. One document, so two-sided printing works too. The job is marked
+   "don't rescale" so 100% stays 100%.
+2. **JPEG**, for printers with no PDF, such as many Canon PIXMA inkjets. JPEG is one page per job, so the
+   app sends a page, waits for the printer to finish it, then sends the next (retrying while the printer
+   says it is busy). Keep NBS Print open until a JPEG job finishes.
+3. **PWG raster** and 4. **AirPrint raster (URF)**: multi-page jobs with the resolution in each page header.
+   They are used only when a printer takes nothing else, or if you pick them under Options → Send as.
 
-Where the printer allows it the job is also marked "don't rescale", so 100% stays 100%. If a printout ever
+**Every image route (JPEG, PWG raster, AirPrint) is sized the same way**, so "Send as" and the number of
+pages never change the printed size. Printers are free to rescale a picture to their printable area whatever
+the file says (a JPEG can shrink to a quarter of its size, and a Canon printed a full-page raster about 10%
+small). So the app cuts each page down to the printer's printable area and asks the printer to fit it, which
+is 1:1 whether or not the printer rescales. Sizes stay within a few percent.
+
+If a printout ever
 comes out the wrong size, open **Options → Send as** and try another format (shown only when the printer
 accepts more than one). **Options → Printer details** shows what the printer reports and which format is
 used, with a Copy button for bug reports.
