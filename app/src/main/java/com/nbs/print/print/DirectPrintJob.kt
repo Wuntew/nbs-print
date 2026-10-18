@@ -60,8 +60,11 @@ sealed interface DirectProgress {
     data class Rendering(val done: Int, val total: Int) : DirectProgress
     data object Sending : DirectProgress
 
-    /** The printer has the job; [status] is its latest word, e.g. "Printing…". */
-    data class Printing(val status: String) : DirectProgress
+    /**
+     * The printer has the job; [status] is its latest word, e.g. "Printing…". [completed] of [total]
+     * pages are done when the printer reports a count (many don't), otherwise both are null.
+     */
+    data class Printing(val status: String, val completed: Int? = null, val total: Int? = null) : DirectProgress
     data class Done(val note: String? = null) : DirectProgress
     data class Failed(val message: String) : DirectProgress
 }
@@ -152,7 +155,7 @@ class DirectPrintJob(
             files.forEach { it.delete() }
         }
 
-        awaitCompletion(printer, progress)
+        awaitCompletion(printer, pages.size * ticket.copies, progress)
     }
 
     private fun track(id: Int?) {
@@ -160,7 +163,7 @@ class DirectPrintJob(
     }
 
     /** Follows the job until the printer finishes it. Printers that forget finished jobs count as done. */
-    private suspend fun awaitCompletion(printer: PrinterRef, progress: (DirectProgress) -> Unit) {
+    private suspend fun awaitCompletion(printer: PrinterRef, expectedPages: Int, progress: (DirectProgress) -> Unit) {
         val id = sentJobId
         if (id == null) {
             progress(DirectProgress.Done("Sent to the printer."))
@@ -184,7 +187,10 @@ class DirectPrintJob(
                     "The printer ${if (status.state == 7) "canceled" else "aborted"} the job." +
                         reasons.firstOrNull()?.let { " $it." }.orEmpty()
                 )
-                else -> progress(DirectProgress.Printing(statusText(status.state, reasons)))
+                else -> {
+                    val done = status.impressionsCompleted?.coerceAtMost(expectedPages)
+                    progress(DirectProgress.Printing(statusText(status.state, reasons), done, expectedPages.takeIf { done != null }))
+                }
             }
             delay(2_000)
         }

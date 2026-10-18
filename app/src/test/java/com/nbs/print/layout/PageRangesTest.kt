@@ -64,6 +64,46 @@ class PageRangesTest {
     }
 
     @Test
+    fun togglingAPageOutOfAllLeavesTheRest() {
+        val sel = PageRanges.toggle(PageSelection(), page = 1, pageCount = 5, currentPage = 0)
+        assertEquals(PageSelection(PageMode.RANGE, "1, 3-5"), sel)
+        assertEquals(listOf(0, 2, 3, 4), PageRanges.selected(sel, 5, 0))
+    }
+
+    @Test
+    fun togglingTheLastMissingPageRestoresAll() {
+        val partial = PageSelection(PageMode.RANGE, "1-4")
+        assertEquals(PageSelection(), PageRanges.toggle(partial, page = 4, pageCount = 5, currentPage = 0))
+    }
+
+    @Test
+    fun togglingFromCurrentPageModeKeepsThatPage() {
+        val sel = PageRanges.toggle(PageSelection(PageMode.CURRENT), page = 3, pageCount = 5, currentPage = 1)
+        assertEquals(listOf(1, 3), PageRanges.selected(sel, 5, 1))
+    }
+
+    @Test
+    fun deselectingEverythingGivesAnEmptyInvalidSelection() {
+        val one = PageSelection(PageMode.RANGE, "2")
+        val none = PageRanges.toggle(one, page = 1, pageCount = 5, currentPage = 0)
+        assertTrue(PageRanges.resolve(none, 5, 0) is PageParse.Invalid)
+        assertEquals(emptyList<Int>(), PageRanges.selected(none, 5, 0))
+    }
+
+    @Test
+    fun togglingOutOfRangeIsIgnored() {
+        val sel = PageSelection(PageMode.RANGE, "1-2")
+        assertEquals(sel, PageRanges.toggle(sel, page = 9, pageCount = 5, currentPage = 0))
+    }
+
+    @Test
+    fun oddAndEvenPages() {
+        assertEquals(listOf(0, 2, 4), PageRanges.selected(PageRanges.odd(5), 5, 0))
+        assertEquals(listOf(1, 3), PageRanges.selected(PageRanges.even(5), 5, 0))
+        assertEquals(PageSelection(), PageRanges.odd(1)) // the only page is odd, so that's everything
+    }
+
+    @Test
     fun describeCollapsesRuns() {
         assertEquals("1-3, 5", PageRanges.describe(listOf(0, 1, 2, 4)))
         assertEquals("2, 3", PageRanges.describe(listOf(1, 2)))

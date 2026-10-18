@@ -54,6 +54,27 @@ object PageRanges {
         return PageParse.Valid(pages.toList())
     }
 
+    /** The pages currently selected, or none if the selection can't be read. */
+    fun selected(selection: PageSelection, pageCount: Int, currentPage: Int): List<Int> =
+        (resolve(selection, pageCount, currentPage) as? PageParse.Valid)?.pages.orEmpty()
+
+    /** A selection of exactly [pages]; everything selected collapses back to "all pages". */
+    fun fromPages(pages: List<Int>, pageCount: Int): PageSelection =
+        if (pageCount > 0 && pages.size == pageCount) PageSelection()
+        else PageSelection(PageMode.RANGE, describe(pages))
+
+    /** Flips one page in or out of the selection (the filmstrip's tap). */
+    fun toggle(selection: PageSelection, page: Int, pageCount: Int, currentPage: Int): PageSelection {
+        if (page !in 0 until pageCount) return selection
+        val set = selected(selection, pageCount, currentPage).toSortedSet()
+        if (!set.add(page)) set.remove(page)
+        return fromPages(set.toList(), pageCount)
+    }
+
+    fun odd(pageCount: Int) = fromPages((0 until pageCount step 2).toList(), pageCount)
+
+    fun even(pageCount: Int) = fromPages((1 until pageCount step 2).toList(), pageCount)
+
     /** "1-3, 5" for zero-based pages [0, 1, 2, 4]. */
     fun describe(pages: List<Int>): String {
         val out = ArrayList<String>()

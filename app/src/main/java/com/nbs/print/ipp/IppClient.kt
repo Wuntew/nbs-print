@@ -32,9 +32,22 @@ data class JobTicket(
 
 data class SentJob(val id: Int?, val state: Int?)
 
-data class JobStatus(val state: Int?, val reasons: List<String>) {
+data class JobStatus(
+    val state: Int?,
+    val reasons: List<String>,
+    /** Pages (impressions) the printer says it has finished, when it reports that at all. */
+    val impressionsCompleted: Int? = null,
+) {
     val isFinished get() = state in 7..9
     val isCompleted get() = state == 9
+
+    companion object {
+        fun from(job: IppGroup?) = JobStatus(
+            state = job?.int("job-state"),
+            reasons = job?.strings("job-state-reasons").orEmpty(),
+            impressionsCompleted = job?.int("job-impressions-completed")?.takeIf { it >= 0 },
+        )
+    }
 }
 
 /** IPP over HTTP(S). Blocking; call from a background thread. */
@@ -87,11 +100,10 @@ class IppClient(private val network: Network? = null) {
                 .operationPreamble(printerUri)
                 .integer("job-id", jobId)
                 .name("requesting-user-name", USER)
-                .keywords("requested-attributes", listOf("job-state", "job-state-reasons"))
+                .keywords("requested-attributes", listOf("job-state", "job-state-reasons", "job-impressions-completed"))
                 .finish()
         }
-        val job = reply.group(IppTag.JOB_GROUP)
-        return JobStatus(job?.int("job-state"), job?.strings("job-state-reasons").orEmpty())
+        return JobStatus.from(reply.group(IppTag.JOB_GROUP))
     }
 
     fun cancelJob(printerUri: String, jobId: Int) {

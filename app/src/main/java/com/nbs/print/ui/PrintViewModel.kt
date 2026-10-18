@@ -3,6 +3,7 @@ package com.nbs.print.ui
 import android.app.Application
 import android.graphics.Bitmap
 import android.net.Uri
+import android.util.LruCache
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.nbs.print.doc.DocumentLoader
@@ -133,6 +134,11 @@ class PrintViewModel(app: Application) : AndroidViewModel(app) {
     fun setPage(page: Int) = _state.update { it.copy(page = page.coerceIn(0, (it.pageCount - 1).coerceAtLeast(0))) }
 
     fun updatePages(change: (PageSelection) -> PageSelection) = _state.update { it.copy(pages = change(it.pages)) }
+
+    /** The filmstrip's tap: include or skip [page], and show it in the preview. */
+    fun togglePage(page: Int) = _state.update { s ->
+        s.copy(pages = PageRanges.toggle(s.pages, page, s.pageCount, s.page), page = page.coerceIn(0, (s.pageCount - 1).coerceAtLeast(0)))
+    }
 
     fun dismissError() = _state.update { it.copy(error = null) }
 
@@ -300,6 +306,29 @@ class PrintViewModel(app: Application) : AndroidViewModel(app) {
 
     private data class PreviewKey(val doc: PrintableDoc?, val options: PrintOptions, val page: Int, val marginPt: Float?)
 
+    // Small renders of what each page will print, for the filmstrip. Cleared whenever anything that
+    // changes how a page looks (document, scale, paper, margins...) changes.
+    private val thumbs = LruCache<Int, Bitmap>(48)
+    private var thumbsFor: PreviewKey? = null
+
+    suspend fun thumbnail(page: Int): Bitmap? {
+        val s = _state.value
+        val doc = s.doc ?: return null
+        val key = PreviewKey(doc, s.options, 0, s.printerCaps?.marginPt)
+        synchronized(thumbs) {
+            if (thumbsFor != key) {
+                thumbs.evictAll()
+                thumbsFor = key
+            }
+            thumbs.get(page)?.let { return it }
+        }
+        val bitmap = withContext(Dispatchers.Default) {
+            runCatching { doc.render(page, s.options.sheetSpec(key.marginPt), s.options, THUMB_PX_PER_PT) }.getOrNull()
+        } ?: return null
+        synchronized(thumbs) { if (thumbsFor == key) thumbs.put(page, bitmap) }
+        return bitmap
+    }
+
     private suspend fun renderPreviews() {
         _state
             .map { PreviewKey(it.doc, it.options, it.page, it.printerCaps?.marginPt) }
@@ -337,5 +366,6 @@ class PrintViewModel(app: Application) : AndroidViewModel(app) {
     private companion object {
         const val KEY_PAPER = "paper"
         const val PREVIEW_PX_PER_PT = 1.6f
+        const val THUMB_PX_PER_PT = 0.3f
     }
 }

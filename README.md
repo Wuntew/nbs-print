@@ -14,9 +14,14 @@ Requires Android 8.0 (API 26) or newer.
 
 ## Features
 
-- **Scaling options:** 100% / no scaling (default), Fit to page, Fill page, or Custom 10–400%.
-- **Page selection:** all pages, just the page you're looking at, or a range like `1-3, 5, 8-`. The
-  preview dims pages that won't print, and the Print button shows how many will.
+- **A calm, paper-first screen.** The page as it will print is the hero, with a "True size" badge. Everything
+  else sits in four tiles (Scale, Pages, Paper, Printer) that open into bottom sheets, instead of a long
+  list of settings. Light and dark.
+- **Scaling options:** 100% / no scaling (default), Fit to page, Fill page, or Custom 10–400%, with a big
+  readout and a slider that has a marked detent at 100.
+- **Page selection:** a filmstrip of page thumbnails under the preview. Tap a page to include or skip it.
+  The Pages sheet adds All, This page, Odd, Even and a range like `1-3, 5, 8-`. The preview dims pages that
+  won't print, and the Print button shows how many will.
 - **Print straight from the app.** Pick a printer once and NBS Print sends the job itself, with copies,
   color / black & white and two-sided printing, and no Android print screen. See below.
 - **Android print dialog too.** Printers that can't be reached directly (USB, Bluetooth, or ones that need
@@ -36,8 +41,10 @@ Tap the printer row above the Print button. NBS Print lists printers it finds on
 discovery AirPrint and Mopria use), or you can add one by IP address or name. Your choice is remembered.
 
 Once a printer is chosen, the app asks it what it supports and only offers that: its paper sizes, color,
-two-sided options and maximum copies. The preview also uses the printer's real margins. After you tap
-Print it shows the printer's progress ("Printing…", "Out of paper") and lets you cancel.
+two-sided options and maximum copies (in an Options tile). The preview also uses the printer's real
+margins. After you tap Print a full-screen progress ring shows the job: pages prepared, sent, and the
+printer's own status ("Printing…", "Out of paper"), with the printer's page count when it reports one.
+You can cancel at any point.
 
 How it works: the app speaks IPP, the standard network-printing protocol, and sends the pages you see in
 the preview as a PDF. Printers that don't accept PDF get one JPEG per page instead (no two-sided there,
@@ -95,7 +102,8 @@ python tools/mock_ipp_printer.py --port 8631 --out scratch/jobs
 
 From the Android emulator the host is `10.0.2.2`, so add the printer as `10.0.2.2:8631`. Flags simulate
 awkward printers: `--jpeg-only`, `--ipp11`, `--no-scaling-attr`, `--reason media-empty-error`,
-`--abort-jobs`, and `--polls 40` (a slow printer, for testing Cancel).
+`--abort-jobs`, `--polls 40` (a slow printer, for testing Cancel) and `--report-pages` (reports the
+printer's page count while printing, for the progress ring).
 
 ## How it works
 
@@ -107,6 +115,11 @@ preview matches what prints. `print/DocPrintAdapter.kt` implements Android's `Pr
 `ipp/` holds the IPP codec, capability parsing, HTTP client, mDNS discovery and saved printers, and
 `print/DirectPrintJob.kt` renders, sends and follows a direct job.
 
-## License
+## License and credits
 
-MIT, see [LICENSE](LICENSE).
+NBS Print is MIT licensed, see [LICENSE](LICENSE).
+
+The app is set in [Hanken Grotesk](https://github.com/marcologous/hanken-grotesk) (© The Hanken Grotesk
+Project Authors), bundled under the SIL Open Font License 1.1, see
+[licenses/HankenGrotesk-OFL.txt](licenses/HankenGrotesk-OFL.txt). The visual design takes its cues from
+common patterns in minimal mobile UI work on Dribbble; no shots are reproduced.

@@ -1,7 +1,9 @@
 package com.nbs.print.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,28 +12,19 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Print
-import androidx.compose.material.icons.filled.Remove
-import androidx.compose.material.icons.filled.Wifi
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -40,267 +33,216 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.shape.RoundedCornerShape
 import com.nbs.print.ipp.Destination
 import com.nbs.print.ipp.PrinterRef
-import com.nbs.print.print.DirectParams
-import com.nbs.print.print.DirectProgress
-import com.nbs.print.print.TwoSided
+import com.nbs.print.ipp.PrinterUri
 import kotlinx.coroutines.delay
 
-/** Tappable "where will this print" row shown above the Print button. */
+/** How the chosen destination is described on the home tile and in the printer sheet. */
+internal data class DestSummary(
+    val name: String,
+    val shortName: String,
+    val status: String,
+    val dot: Color?,
+    val isProblem: Boolean,
+)
+
 @Composable
-internal fun DestinationBar(state: UiState, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val (title, subtitle, problem) = when (val d = state.destination) {
-        Destination.SystemDialog -> Triple("Android print dialog", "Choose a printer in the next screen", false)
+internal fun destSummary(state: UiState): DestSummary {
+    val p = palette
+    return when (val d = state.destination) {
+        Destination.SystemDialog -> DestSummary("Android print dialog", "Android dialog", "Choose in next screen", null, false)
         is Destination.Network -> when (val c = state.caps) {
-            CapsState.Loading, CapsState.None -> Triple(d.printer.name, "Checking printer…", false)
-            is CapsState.Failed -> Triple(d.printer.name, c.message, true)
+            CapsState.None, CapsState.Loading -> DestSummary(d.printer.name, d.printer.name, "Checking…", null, false)
+            is CapsState.Failed -> DestSummary(d.printer.name, d.printer.name, "Can't reach it", p.problem, true)
             is CapsState.Ready -> {
                 val problems = c.caps.problems()
-                if (problems.isEmpty()) Triple(d.printer.name, "Ready · prints directly from this app", false)
-                else Triple(d.printer.name, problems.joinToString(" · "), true)
-            }
-        }
-    }
-    Row(
-        modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            if (state.destination is Destination.Network) Icons.Default.Wifi else Icons.Default.Print,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-        )
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = if (problem) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Icon(Icons.Default.ArrowDropDown, contentDescription = "Change printer")
-    }
-}
-
-/** Copies / color / two-sided: the choices Android's dialog would otherwise own. */
-@Composable
-internal fun PrinterOptionsSection(
-    state: UiState,
-    onDirect: ((DirectParams) -> DirectParams) -> Unit,
-    onRetry: () -> Unit,
-) {
-    if (state.destination !is Destination.Network) return
-    when (val c = state.caps) {
-        CapsState.None, CapsState.Loading -> Section("Printer") { Hint("Checking what this printer supports…") }
-        is CapsState.Failed -> Section("Printer") {
-            Text(c.message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
-            OutlinedButton(onClick = onRetry) { Text("Try again") }
-        }
-        is CapsState.Ready -> {
-            val caps = c.caps
-            val d = state.direct
-            Section("Printer options") {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Copies", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                    IconButton(onClick = { onDirect { it.copy(copies = (it.copies - 1).coerceAtLeast(1)) } }, enabled = d.copies > 1) {
-                        Icon(Icons.Default.Remove, contentDescription = "Fewer copies")
-                    }
-                    Text("${d.copies}", style = MaterialTheme.typography.titleMedium, modifier = Modifier.width(32.dp))
-                    IconButton(
-                        onClick = { onDirect { it.copy(copies = (it.copies + 1).coerceAtMost(caps.copiesMax)) } },
-                        enabled = d.copies < caps.copiesMax,
-                    ) { Icon(Icons.Default.Add, contentDescription = "More copies") }
-                }
-                if (caps.colorSupported && caps.monochromeSupported) {
-                    Chips(listOf(true to "Color", false to "Black & white"), selected = d.color) { v ->
-                        onDirect { it.copy(color = v) }
-                    }
-                }
-                if (caps.canDuplex) {
-                    Chips(
-                        listOf(TwoSided.OFF to "One-sided", TwoSided.LONG_EDGE to "Two-sided · long edge", TwoSided.SHORT_EDGE to "Two-sided · short edge"),
-                        selected = d.twoSided,
-                    ) { v -> onDirect { it.copy(twoSided = v) } }
-                }
-                if (!caps.canPdf) {
-                    Hint("This printer takes one page at a time, so two-sided isn't available and copies come out uncollated.")
-                }
-                if (!caps.scalingNoneSupported) {
-                    Hint("This printer can't be told to skip its own scaling, so output may be slightly resized. The Android print dialog may behave differently.")
-                }
+                if (problems.isEmpty()) DestSummary(d.printer.name, d.printer.name, "Ready", p.ok, false)
+                else DestSummary(d.printer.name, d.printer.name, problems.joinToString(" · "), p.accent, true)
             }
         }
     }
 }
 
-/** Pick Android's dialog, a discovered or saved printer, or add one by address. */
+/** Pick a discovered or saved printer, Android's dialog, or add a printer by address. */
 @Composable
-internal fun PrinterPickerDialog(
+internal fun PrinterSheet(
     state: UiState,
     onDismiss: () -> Unit,
     onSelect: (Destination) -> Unit,
     onRemove: (PrinterRef) -> Unit,
     onAdd: (String) -> Unit,
+    onRetry: () -> Unit,
 ) {
     var address by remember { mutableStateOf("") }
+    var adding by remember { mutableStateOf(false) }
     var gaveUpSearching by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         delay(8_000)
         gaveUpSearching = true
     }
     val current = (state.destination as? Destination.Network)?.printer
+    val summary = destSummary(state)
     val discoveredUris = state.discovered.map { it.uri }.toSet()
     val savedOnly = state.saved.filter { it.uri !in discoveredUris }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Print to") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                PickerRow(
-                    "Android print dialog",
-                    "USB, Bluetooth and printers with a maker's plugin",
-                    selected = state.destination == Destination.SystemDialog,
-                    onClick = { onSelect(Destination.SystemDialog) },
-                )
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+    SheetFrame(onDismiss) {
+        SheetTitle("Print to")
 
-                Text("Printers on your Wi-Fi", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                if (state.discovered.isEmpty()) {
-                    if (gaveUpSearching) {
-                        Text(
-                            "No printers found. Check that the printer is on and on the same Wi-Fi as this phone, or add it by address below.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(vertical = 8.dp),
-                        )
-                    } else {
-                        Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(12.dp))
-                            Text("Searching…", style = MaterialTheme.typography.bodyMedium)
-                        }
-                    }
-                }
-                state.discovered.forEach { p ->
-                    PickerRow(p.name, p.uri, selected = current?.uri == p.uri, onClick = { onSelect(Destination.Network(p)) })
-                }
+        val caps = state.caps
+        if (caps is CapsState.Failed) {
+            Text(caps.message, style = Type.body, color = palette.problem)
+            Spacer(Modifier.height(8.dp))
+            GhostPill("Try again", onRetry, Modifier.fillMaxWidth())
+            Spacer(Modifier.height(8.dp))
+        }
 
-                if (savedOnly.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
-                    Text("Saved", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                    savedOnly.forEach { p ->
-                        PickerRow(
-                            p.name, p.uri, selected = current?.uri == p.uri,
-                            onClick = { onSelect(Destination.Network(p)) },
-                            onRemove = { onRemove(p) },
-                        )
-                    }
-                }
-
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                Text("Add by address", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                OutlinedTextField(
-                    value = address,
-                    onValueChange = { address = it },
-                    label = { Text("IP address or name") },
-                    placeholder = { Text("192.168.1.20") },
-                    singleLine = true,
-                    isError = state.pickerError != null,
-                    supportingText = { state.pickerError?.let { Text(it) } },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                )
-                Button(
-                    onClick = { onAdd(address) },
-                    enabled = address.isNotBlank() && !state.addingPrinter,
-                    modifier = Modifier.padding(top = 4.dp),
-                ) {
-                    if (state.addingPrinter) {
-                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
-                        Spacer(Modifier.width(8.dp))
-                    }
-                    Text(if (state.addingPrinter) "Checking…" else "Add printer")
-                }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Micro("On your Wi-Fi", Modifier.weight(1f))
+            if (state.discovered.isEmpty() && !gaveUpSearching) {
+                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = palette.accent)
+                Spacer(Modifier.width(8.dp))
+                Text("Searching", style = Type.caption, color = palette.muted)
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
-    )
+        }
+        Spacer(Modifier.height(4.dp))
+        if (state.discovered.isEmpty() && gaveUpSearching) {
+            Hint(
+                "No printers found. Check that the printer is on and on the same Wi-Fi as this phone, or add it by address below.",
+                Modifier.padding(vertical = 8.dp),
+            )
+        }
+        state.discovered.forEach { p ->
+            val isCurrent = current?.uri == p.uri
+            PrinterRow(
+                icon = Icons.Default.Print,
+                title = p.name,
+                sub = if (isCurrent) summary.status else addressLabel(p.uri),
+                subDot = if (isCurrent) summary.dot else null,
+                subColor = if (isCurrent && summary.isProblem) palette.problem else palette.muted,
+                selected = isCurrent,
+                onClick = { onSelect(Destination.Network(p)) },
+            )
+        }
+        savedOnly.forEach { p ->
+            val isCurrent = current?.uri == p.uri
+            PrinterRow(
+                icon = Icons.Default.Print,
+                title = p.name,
+                sub = if (isCurrent) summary.status else addressLabel(p.uri),
+                subDot = if (isCurrent) summary.dot else null,
+                subColor = if (isCurrent && summary.isProblem) palette.problem else palette.muted,
+                selected = isCurrent,
+                onClick = { onSelect(Destination.Network(p)) },
+                onRemove = { onRemove(p) },
+            )
+        }
+
+        SectionLabel("Other ways")
+        if (adding) {
+            OutlinedTextField(
+                value = address,
+                onValueChange = { address = it },
+                label = { Text("IP address or name") },
+                placeholder = { Text("192.168.1.20") },
+                singleLine = true,
+                shape = RoundedCornerShape(16.dp),
+                isError = state.pickerError != null,
+                supportingText = { state.pickerError?.let { Text(it) } },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(6.dp))
+            InkPill(
+                if (state.addingPrinter) "Checking…" else "Add printer",
+                onClick = { onAdd(address) },
+                enabled = address.isNotBlank() && !state.addingPrinter,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(6.dp))
+        } else {
+            PrinterRow(
+                icon = Icons.Default.Add, title = "Add by address", sub = "IP address or name",
+                dashed = true, onClick = { adding = true },
+            )
+        }
+        PrinterRow(
+            icon = Icons.Default.Description,
+            title = "Android print dialog",
+            sub = "USB, Bluetooth and plugin printers",
+            selected = state.destination == Destination.SystemDialog,
+            onClick = { onSelect(Destination.SystemDialog) },
+            last = true,
+        )
+    }
+}
+
+private fun addressLabel(uri: String): String {
+    val host = PrinterUri.host(uri)
+    val port = uri.substringAfter("://").substringBefore('/').substringAfterLast(':', "").toIntOrNull()
+    return if (port == null || port == PrinterUri.DEFAULT_PORT) host else "$host:$port"
 }
 
 @Composable
-private fun PickerRow(
+private fun PrinterRow(
+    icon: ImageVector,
     title: String,
-    subtitle: String,
-    selected: Boolean,
+    sub: String,
     onClick: () -> Unit,
+    selected: Boolean = false,
+    subDot: Color? = null,
+    subColor: Color = palette.muted,
+    dashed: Boolean = false,
+    last: Boolean = false,
     onRemove: (() -> Unit)? = null,
 ) {
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 8.dp),
+        Modifier
+            .fillMaxWidth()
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        Box(
+            Modifier
+                .size(46.dp)
+                .clip(CircleShape)
+                .then(if (dashed) Modifier.border(1.5.dp, palette.muted.copy(alpha = 0.55f), CircleShape) else Modifier.background(palette.ground)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = null, tint = palette.ink, modifier = Modifier.size(21.dp))
+        }
+        Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(
-                subtitle, style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
-        }
-        if (selected) Icon(Icons.Default.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary)
-        if (onRemove != null) {
-            IconButton(onClick = onRemove) { Icon(Icons.Default.Close, contentDescription = "Remove ${title}") }
-        }
-    }
-}
-
-/** Progress, result or failure of a direct print job. */
-@Composable
-internal fun JobDialog(job: JobState, onCancel: () -> Unit, onDismiss: () -> Unit) {
-    when (job) {
-        is JobState.Running -> AlertDialog(
-            onDismissRequest = {},
-            title = { Text("Printing to ${job.printerName}") },
-            text = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 3.dp)
-                    Spacer(Modifier.width(16.dp))
-                    Text(progressText(job.progress))
+            Text(title, style = Type.bodyMedium, color = palette.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
+                if (subDot != null) {
+                    Dot(subDot, size = 6.dp)
+                    Spacer(Modifier.width(6.dp))
                 }
-            },
-            confirmButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
-        )
-
-        is JobState.Finished -> AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text("Sent to ${job.printerName}") },
-            text = { Text(job.note ?: "Your printer has finished the job.") },
-            confirmButton = { TextButton(onClick = onDismiss) { Text("OK") } },
-        )
-
-        is JobState.Failed -> AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text("Couldn't print") },
-            text = { Text(job.message) },
-            confirmButton = { TextButton(onClick = onDismiss) { Text("OK") } },
-        )
+                Text(sub, style = Type.caption.copy(fontSize = 13.sp), color = subColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        if (selected) {
+            Box(Modifier.size(26.dp).clip(CircleShape).background(palette.ink), contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.Check, contentDescription = "Selected", tint = palette.onInk, modifier = Modifier.size(14.dp))
+            }
+        }
+        if (onRemove != null) {
+            Box(
+                Modifier.size(44.dp).clip(CircleShape).clickable(role = Role.Button, onClick = onRemove),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Default.Close, contentDescription = "Remove $title", tint = palette.muted, modifier = Modifier.size(18.dp)) }
+        }
     }
-}
-
-private fun progressText(p: DirectProgress): String = when (p) {
-    is DirectProgress.Rendering -> "Preparing page ${p.done + 1} of ${p.total}…"
-    DirectProgress.Sending -> "Sending to the printer…"
-    is DirectProgress.Printing -> p.status
-    is DirectProgress.Done -> "Done"
-    is DirectProgress.Failed -> p.message
+    if (!last) HorizontalDivider(color = palette.hairline)
 }

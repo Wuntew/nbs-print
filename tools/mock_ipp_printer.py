@@ -9,7 +9,7 @@ the app sent.
 
 From the Android emulator the host machine is 10.0.2.2, so add the printer in the app as
 "10.0.2.2:8631". Flags simulate awkward printers: --jpeg-only, --ipp11, --no-scaling-attr,
---reason media-empty-error, --abort-jobs, --polls 30 (slow).
+--reason media-empty-error, --abort-jobs, --polls 30 (slow), --report-pages.
 """
 import argparse
 import json
@@ -165,6 +165,8 @@ class Printer:
             else:
                 state, reasons = 9, ["job-completed-successfully"]
             body = bytes([TAG_JOB]) + attr(ENUM, "job-state", i32(state)) + multi(KEYWORD, "job-state-reasons", reasons)
+            if self.args.report_pages:  # many real printers omit this; some report it
+                body += attr(INT, "job-impressions-completed", i32(job["polls"] - 1 if state == 5 else 99))
             return header(0) + opgrp + body + bytes([TAG_END])
 
         if op == 0x0008:  # Cancel-Job
@@ -213,6 +215,7 @@ if __name__ == "__main__":
     ap.add_argument("--no-scaling-attr", action="store_true", help="don't advertise print-scaling-supported")
     ap.add_argument("--reason", help="printer-state-reasons to report, e.g. media-empty-error")
     ap.add_argument("--polls", type=int, default=2, help="status polls before a job reports completed (slow printer)")
+    ap.add_argument("--report-pages", action="store_true", help="report job-impressions-completed while printing")
     ap.add_argument("--abort-jobs", action="store_true", help="report every job as aborted")
     args = ap.parse_args()
     server = ThreadingHTTPServer(("0.0.0.0", args.port), make_handler(Printer(args)))

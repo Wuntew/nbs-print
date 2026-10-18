@@ -52,6 +52,8 @@ class MainActivity : ComponentActivity() {
                         onPage = vm::setPage,
                         onDismissError = vm::dismissError,
                         onPages = vm::updatePages,
+                        onTogglePage = vm::togglePage,
+                        loadThumb = vm::thumbnail,
                         onOpenPicker = vm::openPicker,
                         onClosePicker = vm::closePicker,
                         onSelectDestination = vm::selectDestination,

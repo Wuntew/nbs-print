@@ -67,6 +67,30 @@ plugin-only printers.
   copies, sides, color, media filtering, landscape rotation, error and abort handling, cancel. Not
   verified: mDNS discovery on a real LAN and real-printer quirks.
 
+## v1.2: the "Sheet" redesign (approved 2026-10-18)
+
+Chosen from three concepts (Sheet, Dial, Sentence) that were drawn up from research into highly rated
+minimal mobile UI on Dribbble. Decision: build **Sheet**, borrowing Dial's **page filmstrip** and
+**printing ring**.
+
+- **Principles carried over from the research:** one hero object per screen; type does the work; a single
+  accent (vermilion, only ever the "true size" dot and the current-page dot); options hidden behind
+  compact tiles that open into sheets; pill buttons; no gradients.
+- **Home:** header (file, page count, open and printer-settings buttons); the preview as a paper with a
+  scale badge; a filmstrip (multi-page documents only) where tapping a thumbnail includes or skips that page
+  and moves the preview to it; tiles Scale, Pages, Paper, Printer, plus Options when printing directly;
+  a Print pill. Swiping the paper browses pages without changing the selection.
+- **Sheets:** Scale (hero numeral, segmented 100% / Fit / Fill / Custom, slider with a detent mark at
+  100, exact field), Pages (All, This page, Odd, Even, Range), Paper & layout, Options (copies, color,
+  two-sided), and the printer picker. Confirm buttons sit in a footer pinned below the scrolling content, so
+  they stay above 3-button navigation even on a short landscape screen.
+- **Printing ring:** full-screen job progress. Tick marks fill as pages are prepared; a highlight sweeps
+  round while the printer works; if the printer reports `job-impressions-completed` the ring shows real
+  pages printed. Finished and failed states share the screen.
+- **Theme:** Hanken Grotesk (variable font, OFL), warm-grey ground, white tiles, ink type; a dark variant.
+- **Layout:** portrait stacks everything with Print last; landscape puts the paper and filmstrip left and
+  the tiles right with Print pinned. Verified in 3-button and gesture navigation, light and dark.
+
 ## Out of scope
 
 Office/web conversion, tiling oversized content across sheets, vector PDF output, password-protected PDFs,

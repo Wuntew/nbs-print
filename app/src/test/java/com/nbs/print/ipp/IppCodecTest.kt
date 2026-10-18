@@ -167,6 +167,33 @@ class IppCodecTest {
     }
 
     @Test
+    fun jobStatusReadsStateReasonsAndPageCount() {
+        val job = IppCodec.decode(
+            IppWriter(0, 1).operationPreamble().group(IppTag.JOB_GROUP)
+                .enum("job-state", 5)
+                .keywords("job-state-reasons", listOf("job-printing"))
+                .integer("job-impressions-completed", 2)
+                .finish()
+        ).group(IppTag.JOB_GROUP)
+        val status = JobStatus.from(job)
+        assertEquals(5, status.state)
+        assertEquals(listOf("job-printing"), status.reasons)
+        assertEquals(2, status.impressionsCompleted)
+        assertFalse(status.isFinished)
+    }
+
+    @Test
+    fun jobStatusWithoutAPageCountOrJobGroup() {
+        assertNull(JobStatus.from(null).impressionsCompleted)
+        val done = JobStatus.from(
+            IppCodec.decode(IppWriter(0, 1).operationPreamble().group(IppTag.JOB_GROUP).enum("job-state", 9).finish())
+                .group(IppTag.JOB_GROUP)
+        )
+        assertTrue(done.isCompleted && done.isFinished)
+        assertNull(done.impressionsCompleted)
+    }
+
+    @Test
     fun printerUriNormalization() {
         assertEquals("ipp://192.168.1.20:631/ipp/print", PrinterUri.normalize("192.168.1.20"))
         assertEquals("ipp://192.168.1.20:9100/ipp/printer", PrinterUri.normalize(" 192.168.1.20:9100/ipp/printer "))
