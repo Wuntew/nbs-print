@@ -16,9 +16,12 @@ import androidx.activity.viewModels
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.core.content.IntentCompat
+import com.nbs.print.ipp.Destination
+import com.nbs.print.layout.PageParse
 import com.nbs.print.layout.Paper
 import com.nbs.print.print.DocPrintAdapter
 import com.nbs.print.ui.NbsPrintTheme
+import com.nbs.print.ui.PrintActions
 import com.nbs.print.ui.PrintScreen
 import com.nbs.print.ui.PrintViewModel
 
@@ -41,12 +44,24 @@ class MainActivity : ComponentActivity() {
                 val state by vm.state.collectAsState()
                 PrintScreen(
                     state = state,
-                    onPick = { picker.launch(arrayOf("application/pdf", "image/*", "text/plain")) },
-                    onPrint = ::printNow,
-                    onPrinterSettings = ::openPrinterSettings,
-                    onChange = vm::update,
-                    onPage = vm::setPage,
-                    onDismissError = vm::dismissError,
+                    a = PrintActions(
+                        onPick = { picker.launch(arrayOf("application/pdf", "image/*", "text/plain")) },
+                        onPrint = ::printNow,
+                        onPrinterSettings = ::openPrinterSettings,
+                        onChange = vm::update,
+                        onPage = vm::setPage,
+                        onDismissError = vm::dismissError,
+                        onPages = vm::updatePages,
+                        onOpenPicker = vm::openPicker,
+                        onClosePicker = vm::closePicker,
+                        onSelectDestination = vm::selectDestination,
+                        onRemoveSaved = vm::removeSaved,
+                        onAddPrinter = vm::addPrinterByAddress,
+                        onDirect = vm::updateDirect,
+                        onRetryCaps = vm::retryCaps,
+                        onCancelJob = vm::cancelJob,
+                        onDismissJob = vm::dismissJob,
+                    ),
                 )
             }
         }
@@ -74,7 +89,12 @@ class MainActivity : ComponentActivity() {
 
     private fun printNow() {
         val state = vm.state.value
+        if (state.destination is Destination.Network) {
+            vm.printDirect()
+            return
+        }
         val doc = state.doc ?: return
+        val pages = (state.selection as? PageParse.Valid)?.pages ?: return
         val o = state.options
         val portrait = mediaFor(o.paper)
         val attrs = PrintAttributes.Builder()
@@ -84,7 +104,7 @@ class MainActivity : ComponentActivity() {
             .build()
         val jobName = doc.title
         getSystemService(PrintManager::class.java)
-            .print(jobName, DocPrintAdapter(this, doc, o, jobName), attrs)
+            .print(jobName, DocPrintAdapter(this, doc, o, jobName, pages), attrs)
     }
 
     private fun openPrinterSettings() {

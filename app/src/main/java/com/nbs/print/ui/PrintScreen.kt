@@ -1,6 +1,5 @@
 package com.nbs.print.ui
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -9,7 +8,6 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -63,33 +61,62 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.nbs.print.ipp.Destination
+import com.nbs.print.ipp.PrinterRef
 import com.nbs.print.layout.Anchor
 import com.nbs.print.layout.MarginMode
+import com.nbs.print.layout.PageParse
+import com.nbs.print.layout.PageSelection
 import com.nbs.print.layout.Paper
 import com.nbs.print.layout.PrintOptions
 import com.nbs.print.layout.ScaleMode
 import com.nbs.print.layout.ScalingMath
+import com.nbs.print.print.DirectParams
 import kotlin.math.roundToInt
 
 private typealias OptionsChange = ((PrintOptions) -> PrintOptions) -> Unit
 
+/** Everything the screen can ask the app to do. */
+class PrintActions(
+    val onPick: () -> Unit,
+    val onPrint: () -> Unit,
+    val onPrinterSettings: () -> Unit,
+    val onChange: OptionsChange,
+    val onPage: (Int) -> Unit,
+    val onDismissError: () -> Unit,
+    val onPages: ((PageSelection) -> PageSelection) -> Unit,
+    val onOpenPicker: () -> Unit,
+    val onClosePicker: () -> Unit,
+    val onSelectDestination: (Destination) -> Unit,
+    val onRemoveSaved: (PrinterRef) -> Unit,
+    val onAddPrinter: (String) -> Unit,
+    val onDirect: ((DirectParams) -> DirectParams) -> Unit,
+    val onRetryCaps: () -> Unit,
+    val onCancelJob: () -> Unit,
+    val onDismissJob: () -> Unit,
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PrintScreen(
-    state: UiState,
-    onPick: () -> Unit,
-    onPrint: () -> Unit,
-    onPrinterSettings: () -> Unit,
-    onChange: OptionsChange,
-    onPage: (Int) -> Unit,
-    onDismissError: () -> Unit,
-) {
+fun PrintScreen(state: UiState, a: PrintActions) {
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(state.error) {
         state.error?.let {
             snackbar.showSnackbar(it)
-            onDismissError()
+            a.onDismissError()
         }
+    }
+
+    val selection = state.selection
+    val selectedCount = (selection as? PageParse.Valid)?.pages?.size
+    val destinationReady = when (state.destination) {
+        Destination.SystemDialog -> true
+        is Destination.Network -> state.printerCaps?.canPrint == true
+    }
+    val printLabel = when {
+        selectedCount != null && state.pageCount > 0 && selectedCount < state.pageCount ->
+            "Print $selectedCount of ${state.pageCount} pages"
+        else -> "Print"
     }
 
     Scaffold(
@@ -97,9 +124,9 @@ fun PrintScreen(
             TopAppBar(
                 title = { Text("NBS Print") },
                 actions = {
-                    IconButton(onClick = onPick) { Icon(Icons.Default.FolderOpen, contentDescription = "Choose file") }
-                    IconButton(onClick = onPrinterSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "Printer setup")
+                    IconButton(onClick = a.onPick) { Icon(Icons.Default.FolderOpen, contentDescription = "Choose file") }
+                    IconButton(onClick = a.onPrinterSettings) {
+                        Icon(Icons.Default.Settings, contentDescription = "Android printer settings")
                     }
                 },
             )
@@ -107,23 +134,35 @@ fun PrintScreen(
         bottomBar = {
             // Keeps the Print button clear of the 3-button bar / gesture pill and display cutouts.
             Surface(tonalElevation = 3.dp, shadowElevation = 6.dp) {
-                Box(
+                BoxWithConstraints(
                     Modifier
                         .windowInsetsPadding(
                             WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
                         )
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
                 ) {
-                    Button(
-                        onClick = onPrint,
-                        enabled = state.doc != null && state.preview != null,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp),
-                    ) {
-                        Icon(Icons.Default.Print, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Print")
+                    val printEnabled =
+                        state.doc != null && state.preview != null && selection is PageParse.Valid && destinationReady
+                    val printButton: @Composable (Modifier) -> Unit = { m ->
+                        Button(onClick = a.onPrint, enabled = printEnabled, modifier = m.height(52.dp)) {
+                            Icon(Icons.Default.Print, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(printLabel)
+                        }
+                    }
+                    if (maxWidth > 560.dp) {
+                        // Wide / landscape: printer and Print button share one row to save height.
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            DestinationBar(state, onClick = a.onOpenPicker, modifier = Modifier.weight(1f))
+                            Spacer(Modifier.width(16.dp))
+                            printButton(Modifier.width(280.dp))
+                        }
+                    } else {
+                        Column {
+                            DestinationBar(state, onClick = a.onOpenPicker)
+                            Spacer(Modifier.height(8.dp))
+                            printButton(Modifier.fillMaxWidth())
+                        }
                     }
                 }
             }
@@ -132,23 +171,34 @@ fun PrintScreen(
     ) { padding ->
         Box(Modifier.padding(padding).fillMaxSize()) {
             when {
-                state.doc == null -> EmptyState(state.loading, onPick)
+                state.doc == null -> EmptyState(state.loading, a.onPick)
                 else -> BoxWithConstraints(Modifier.fillMaxSize()) {
                     if (maxWidth > maxHeight) {
                         Row(Modifier.fillMaxSize()) {
-                            PreviewPane(state, onPage, Modifier.weight(1f).fillMaxHeight())
-                            OptionsPane(state, onChange, Modifier.weight(1f).fillMaxHeight())
+                            PreviewPane(state, a.onPage, Modifier.weight(1f).fillMaxHeight())
+                            OptionsPane(state, a, Modifier.weight(1f).fillMaxHeight())
                         }
                     } else {
                         Column(Modifier.fillMaxSize()) {
-                            PreviewPane(state, onPage, Modifier.weight(0.46f).fillMaxWidth())
-                            OptionsPane(state, onChange, Modifier.weight(0.54f).fillMaxWidth())
+                            PreviewPane(state, a.onPage, Modifier.weight(0.42f).fillMaxWidth())
+                            OptionsPane(state, a, Modifier.weight(0.58f).fillMaxWidth())
                         }
                     }
                 }
             }
         }
     }
+
+    if (state.pickerOpen) {
+        PrinterPickerDialog(
+            state,
+            onDismiss = a.onClosePicker,
+            onSelect = a.onSelectDestination,
+            onRemove = a.onRemoveSaved,
+            onAdd = a.onAddPrinter,
+        )
+    }
+    state.job?.let { JobDialog(it, onCancel = a.onCancelJob, onDismiss = a.onDismissJob) }
 }
 
 @Composable
@@ -193,14 +243,14 @@ private fun EmptyState(loading: Boolean, onPick: () -> Unit) {
 
 @Composable
 private fun PreviewPane(state: UiState, onPage: (Int) -> Unit, modifier: Modifier) {
+    val sel = state.selection
+    val skipped = sel is PageParse.Valid && state.page !in sel.pages
     Column(modifier.background(MaterialTheme.colorScheme.surfaceVariant).padding(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                state.doc?.title.orEmpty(),
-                style = MaterialTheme.typography.labelLarge,
-                maxLines = 1,
-                modifier = Modifier.weight(1f),
-            )
+            Column(Modifier.weight(1f)) {
+                Text(state.doc?.title.orEmpty(), style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                if (skipped) NotSelectedBadge()
+            }
             if (state.pageCount > 1) {
                 IconButton(onClick = { onPage(state.page - 1) }, enabled = state.page > 0) {
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Previous page")
@@ -220,6 +270,7 @@ private fun PreviewPane(state: UiState, onPage: (Int) -> Unit, modifier: Modifie
                     bitmap = bitmap.asImageBitmap(),
                     contentDescription = "Print preview",
                     contentScale = ContentScale.Fit,
+                    alpha = if (skipped) 0.4f else 1f,
                     modifier = Modifier.shadow(4.dp).background(Color.White),
                 )
             }
@@ -229,8 +280,9 @@ private fun PreviewPane(state: UiState, onPage: (Int) -> Unit, modifier: Modifie
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun OptionsPane(state: UiState, onChange: OptionsChange, modifier: Modifier) {
+private fun OptionsPane(state: UiState, a: PrintActions, modifier: Modifier) {
     val o = state.options
+    val caps = state.printerCaps
     Column(
         modifier
             .verticalScroll(rememberScrollState())
@@ -246,10 +298,10 @@ private fun OptionsPane(state: UiState, onChange: OptionsChange, modifier: Modif
                     ScaleMode.CUSTOM to "Custom",
                 ),
                 selected = o.scale.mode,
-            ) { mode -> onChange { it.copy(scale = it.scale.copy(mode = mode)) } }
+            ) { mode -> a.onChange { it.copy(scale = it.scale.copy(mode = mode)) } }
 
             if (o.scale.mode == ScaleMode.CUSTOM) {
-                CustomPercent(o.scale.customPercent) { p -> onChange { it.copy(scale = it.scale.copy(customPercent = p)) } }
+                CustomPercent(o.scale.customPercent) { p -> a.onChange { it.copy(scale = it.scale.copy(customPercent = p)) } }
             }
             val hint = when {
                 state.doc?.isText == true -> "For text, Custom % changes the font size; Fit and Fill print at 100%."
@@ -261,17 +313,25 @@ private fun OptionsPane(state: UiState, onChange: OptionsChange, modifier: Modif
             hint?.let { Hint(it) }
         }
 
+        PagesSection(state, a.onPages)
+
+        PrinterOptionsSection(state, a.onDirect, a.onRetryCaps)
+
         Section("Paper") {
-            Chips(Paper.entries.map { it to it.label }, selected = o.paper) { p -> onChange { it.copy(paper = p) } }
+            val papers = Paper.entries.filter { caps?.supportsPaper(it) ?: true }
+            Chips(papers.map { it to it.label }, selected = o.paper) { p -> a.onChange { it.copy(paper = p) } }
             Chips(listOf(false to "Portrait", true to "Landscape"), selected = o.landscape) { l ->
-                onChange { it.copy(landscape = l) }
+                a.onChange { it.copy(landscape = l) }
             }
-            Hint("Copies, color, duplex and page range are chosen in the print dialog.")
+            Hint(
+                if (state.destination is Destination.Network) "Only paper sizes this printer reports are offered."
+                else "Copies, color, duplex and page range can also be changed in the print dialog."
+            )
         }
 
         Section("Position") {
-            Chips(listOf(Anchor.CENTER to "Centered", Anchor.TOP_LEFT to "Top-left"), selected = o.scale.anchor) { a ->
-                onChange { it.copy(scale = it.scale.copy(anchor = a)) }
+            Chips(listOf(Anchor.CENTER to "Centered", Anchor.TOP_LEFT to "Top-left"), selected = o.scale.anchor) { an ->
+                a.onChange { it.copy(scale = it.scale.copy(anchor = an)) }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -280,7 +340,7 @@ private fun OptionsPane(state: UiState, onChange: OptionsChange, modifier: Modif
                 }
                 Switch(
                     checked = o.scale.autoRotate,
-                    onCheckedChange = { v -> onChange { it.copy(scale = it.scale.copy(autoRotate = v)) } },
+                    onCheckedChange = { v -> a.onChange { it.copy(scale = it.scale.copy(autoRotate = v)) } },
                 )
             }
         }
@@ -293,9 +353,9 @@ private fun OptionsPane(state: UiState, onChange: OptionsChange, modifier: Modif
                     MarginMode.CUSTOM to "Custom",
                 ),
                 selected = o.marginMode,
-            ) { m -> onChange { it.copy(marginMode = m) } }
+            ) { m -> a.onChange { it.copy(marginMode = m) } }
             if (o.marginMode == MarginMode.CUSTOM) {
-                NumberField(o.customMarginMm, 0f, 50f, "mm", "Margin") { v -> onChange { it.copy(customMarginMm = v) } }
+                NumberField(o.customMarginMm, 0f, 50f, "mm", "Margin") { v -> a.onChange { it.copy(customMarginMm = v) } }
             }
         }
 
@@ -304,7 +364,7 @@ private fun OptionsPane(state: UiState, onChange: OptionsChange, modifier: Modif
                 Chips(
                     PrintOptions.IMAGE_DPI_CHOICES.map { it to "$it dpi" },
                     selected = o.imageDpi,
-                ) { d -> onChange { it.copy(imageDpi = d) } }
+                ) { d -> a.onChange { it.copy(imageDpi = d) } }
                 Hint("Photos have no real physical size, so 100% assumes this resolution. Higher dpi prints smaller.")
             }
         }
@@ -312,7 +372,7 @@ private fun OptionsPane(state: UiState, onChange: OptionsChange, modifier: Modif
 }
 
 @Composable
-private fun Section(title: String, content: @Composable () -> Unit) {
+internal fun Section(title: String, content: @Composable () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
         content()
@@ -320,13 +380,13 @@ private fun Section(title: String, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun Hint(text: String) {
+internal fun Hint(text: String) {
     Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun <T> Chips(items: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit) {
+internal fun <T> Chips(items: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         items.forEach { (value, label) ->
             FilterChip(selected = value == selected, onClick = { onSelect(value) }, label = { Text(label) })

@@ -39,7 +39,35 @@ Edge-to-edge with explicit insets: the bottom Print bar pads for `safeDrawing` b
 insets, so it clears the 3-button bar, the gesture pill and cutouts. Verified on an emulator in
 3-button and gesture modes, portrait and landscape.
 
+## v1.1: page selection and direct IPP printing (approved 2026-10-18)
+
+**Page selection.** `PageSelection` (All / This page / range text such as `1-3, 5, 8-`) is parsed by the
+pure `PageRanges`. It applies to both print paths: `DocPrintAdapter` writes only the selected pages, and
+direct printing renders only them. It resets to All for each new document, like scaling does.
+
+**Direct printing.** Android's print framework always shows its dialog, so skipping it means speaking IPP
+to the printer ourselves. The earlier "direct IPP" rejection (large, network-only, untestable) is
+superseded at the user's request; the Android dialog stays as a second destination for USB, Bluetooth and
+plugin-only printers.
+
+- Discovery by mDNS (`_ipp._tcp`, `_ipps._tcp`) plus manual address entry, saved printers, remembered
+  destination. Capabilities (formats, copies, color, sides, media, margins, scaling) come from
+  Get-Printer-Attributes and shape the UI: only supported paper sizes, only supported options.
+- Format: one PDF job when the printer accepts `application/pdf`; otherwise one JPEG job per page
+  (density stamped into the JFIF header, no two-sided). PWG raster was left out: untestable without
+  hardware and rarely the only option.
+- Pages are rendered by the same `PrintableDoc.render` as the preview, at the printer's resolution
+  (150-300 dpi), and sent with `print-scaling=none` when supported so 100% stays 100%. Landscape sheets are
+  rotated into the portrait feed direction.
+- Sockets are bound to the Wi-Fi/Ethernet network so a printer's no-internet Wi-Fi isn't bypassed via
+  mobile data. Cleartext is permitted (printers are addressed by LAN IP); self-signed `ipps://` certificates
+  are trusted only for local addresses. IPP 2.0 with a retry as 1.1.
+- Job lifecycle: progress, completion polling, printer problems ("Out of paper"), cancel (Cancel-Job).
+- Verified against `tools/mock_ipp_printer.py`: PDF and JPEG routes, IPP 1.1 fallback, page subset,
+  copies, sides, color, media filtering, landscape rotation, error and abort handling, cancel. Not
+  verified: mDNS discovery on a real LAN and real-printer quirks.
+
 ## Out of scope
 
-Direct IPP, Office/web conversion, tiling oversized content across sheets, vector PDF output,
-password-protected PDFs.
+Office/web conversion, tiling oversized content across sheets, vector PDF output, password-protected PDFs,
+printer authentication, PWG-raster/URF output.

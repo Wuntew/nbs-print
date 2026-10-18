@@ -15,11 +15,11 @@ import android.print.pdf.PrintedPdfDocument
 import com.nbs.print.doc.PrintableDoc
 import com.nbs.print.layout.Margins
 import com.nbs.print.layout.PrintOptions
+import com.nbs.print.layout.RenderDensity
 import com.nbs.print.layout.SheetSpec
 import java.io.FileOutputStream
 import java.util.concurrent.Executors
 import kotlin.math.min
-import kotlin.math.sqrt
 
 /**
  * Bridges a [PrintableDoc] to Android's print framework. The framework tells us the paper
@@ -31,6 +31,8 @@ class DocPrintAdapter(
     doc: PrintableDoc,
     private val options: PrintOptions,
     private val jobName: String,
+    /** Zero-based document pages to print, in order. */
+    private val requestedPages: List<Int>,
 ) : PrintDocumentAdapter() {
     private val doc: PrintableDoc = doc.retain()
     private val main = Handler(Looper.getMainLooper())
@@ -38,7 +40,10 @@ class DocPrintAdapter(
 
     private var attributes: PrintAttributes? = null
     private var sheet: SheetSpec? = null
-    private var pageCount = 0
+
+    // The document pages that survived layout (text can reflow to fewer pages on other paper).
+    private var selectedPages: List<Int> = emptyList()
+    private val pageCount get() = selectedPages.size
 
     override fun onLayout(
         oldAttributes: PrintAttributes?,
@@ -53,24 +58,27 @@ class DocPrintAdapter(
         }
         val newSheet = sheetFor(newAttributes, options)
         worker.execute {
-            val count = try {
-                doc.pageCount(newSheet, options)
+            val selected = try {
+                val total = doc.pageCount(newSheet, options)
+                requestedPages.filter { it in 0 until total }
             } catch (t: Throwable) {
                 main.post { callback.onLayoutFailed(t.message ?: "Couldn't lay out the document") }
                 return@execute
             }
             main.post {
-                if (cancellationSignal.isCanceled) {
-                    callback.onLayoutCancelled()
-                } else {
-                    attributes = newAttributes
-                    sheet = newSheet
-                    pageCount = count
-                    val info = PrintDocumentInfo.Builder(jobName)
-                        .setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
-                        .setPageCount(count)
-                        .build()
-                    callback.onLayoutFinished(info, true)
+                when {
+                    cancellationSignal.isCanceled -> callback.onLayoutCancelled()
+                    selected.isEmpty() -> callback.onLayoutFailed("None of the selected pages exist on this paper")
+                    else -> {
+                        attributes = newAttributes
+                        sheet = newSheet
+                        selectedPages = selected
+                        val info = PrintDocumentInfo.Builder(jobName)
+                            .setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
+                            .setPageCount(selected.size)
+                            .build()
+                        callback.onLayoutFinished(info, true)
+                    }
                 }
             }
         }
@@ -98,7 +106,7 @@ class DocPrintAdapter(
                         main.post { callback.onWriteCancelled() }
                         return@execute
                     }
-                    val bitmap = doc.render(index, sheet, options, pxPerPt)
+                    val bitmap = doc.render(selectedPages[index], sheet, options, pxPerPt)
                     val page = pdf.startPage(n)
                     page.canvas.drawBitmap(bitmap, null, RectF(0f, 0f, sheet.widthPt, sheet.heightPt), paint)
                     pdf.finishPage(page)
@@ -121,10 +129,6 @@ class DocPrintAdapter(
     }
 
     companion object {
-        private const val MAX_DPI = 300f
-        private const val MIN_DPI = 150f
-        private const val MAX_PIXELS = 28_000_000f
-
         fun sheetFor(attrs: PrintAttributes, options: PrintOptions): SheetSpec {
             val media = attrs.mediaSize
             val widthPt = (media?.widthMils ?: 8500) * PrintOptions.PT_PER_MIL
@@ -142,11 +146,8 @@ class DocPrintAdapter(
         /** Render density: the printer's resolution, capped so large paper sizes stay within memory. */
         fun pxPerPt(attrs: PrintAttributes, sheet: SheetSpec): Float {
             val res = attrs.resolution
-            val requested = if (res == null) MAX_DPI else min(res.horizontalDpi, res.verticalDpi).toFloat()
-            var dpi = requested.coerceIn(MIN_DPI, MAX_DPI)
-            val areaIn2 = (sheet.widthPt / 72f) * (sheet.heightPt / 72f)
-            dpi = min(dpi, sqrt(MAX_PIXELS / areaIn2))
-            return dpi / 72f
+            val requested = if (res == null) RenderDensity.MAX_DPI else min(res.horizontalDpi, res.verticalDpi).toFloat()
+            return RenderDensity.pxPerPt(requested, sheet)
         }
 
         /** Expands the framework's page ranges into concrete, ordered page indexes. */
