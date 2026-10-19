@@ -99,14 +99,12 @@ class BuildTicketTest {
     // ---- choosing how to send ----------------------------------------------------------------
 
     @Test
-    fun routesAreOrderedPdfThenJpegThenRasters() {
+    fun routesAreOrderedPdfThenRastersThenJpeg() {
         val all = caps(formats = pdfOnly + rasterOnly + urfOnly + jpegOnly, urfSupported = urfTokens)
-        assertEquals(listOf(PrintRoute.PDF, PrintRoute.JPEG, PrintRoute.RASTER, PrintRoute.URF), all.routes)
-        assertEquals(PrintRoute.JPEG, caps(formats = urfOnly + jpegOnly, urfSupported = urfTokens).routeFor(null))
-        assertEquals(PrintRoute.URF, caps(formats = urfOnly, urfSupported = urfTokens).routeFor(null))
-        assertEquals(PrintRoute.URF, caps(formats = urfOnly + jpegOnly, urfSupported = urfTokens).routeFor(PrintRoute.URF))
-        assertEquals(PrintRoute.JPEG, caps(formats = rasterOnly + jpegOnly).routeFor(null))
-        assertEquals(PrintRoute.RASTER, caps(formats = rasterOnly).routeFor(null))
+        assertEquals(listOf(PrintRoute.PDF, PrintRoute.RASTER, PrintRoute.URF, PrintRoute.JPEG), all.routes)
+        assertEquals(PrintRoute.URF, caps(formats = urfOnly + jpegOnly, urfSupported = urfTokens).routeFor(null))
+        assertEquals(PrintRoute.JPEG, caps(formats = urfOnly + jpegOnly, urfSupported = urfTokens).routeFor(PrintRoute.JPEG))
+        assertEquals(PrintRoute.RASTER, caps(formats = rasterOnly + jpegOnly).routeFor(null))
         assertEquals(PrintRoute.JPEG, caps(formats = jpegOnly).routeFor(null))
         assertNull(caps(formats = setOf("application/octet-stream")).routeFor(null))
         assertTrue(!caps(formats = emptySet()).canPrint)
@@ -158,7 +156,7 @@ class BuildTicketTest {
         assertEquals(setOf("sgray_8", "srgb_8"), c.rasterTypes)
         assertEquals(listOf(300), c.rasterDpis)
         assertEquals(setOf("auto", "fit", "none"), c.printScaling)
-        assertEquals(listOf(PrintRoute.JPEG, PrintRoute.RASTER), c.routes)
+        assertEquals(listOf(PrintRoute.RASTER, PrintRoute.JPEG), c.routes)
     }
 
     // ---- AirPrint (URF) ----------------------------------------------------------------------
@@ -190,7 +188,7 @@ class BuildTicketTest {
             .finish()
         val c = PrinterCaps.parse(IppCodec.decode(bytes))
         assertEquals(setOf("V1.4", "CP1", "W8", "SRGB24", "RS300-600"), c.urfSupported)
-        assertEquals(listOf(PrintRoute.JPEG, PrintRoute.URF), c.routes)
+        assertEquals(listOf(PrintRoute.URF, PrintRoute.JPEG), c.routes)
     }
 
     @Test

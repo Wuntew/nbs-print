@@ -60,17 +60,17 @@ data class PrinterCaps(
     val canUrf get() = "image/urf" in formats && urfPlan(color = true) != null
 
     /**
-     * Formats this printer can take, best first: PDF, then JPEG, PWG raster and AirPrint raster. JPEG ranks
-     * above the raster routes because it is the one proven to print at true size on a real inkjet (a Canon
-     * PIXMA); the raster routes are only chosen when the printer takes nothing else, or by hand under
-     * Options > Send as. All image routes are cut to the printable area and sent with fit, so they agree.
+     * Formats this printer can take, best first: PDF, PWG raster, AirPrint raster, then JPEG. The first three
+     * send every page as one job, so the printer runs it on its own; JPEG is one job per page and needs the
+     * app to feed the printer page by page, so it is the last resort. Every image route is cut to the
+     * printable area and sent with fit, so they print the same size.
      */
     val routes: List<PrintRoute>
         get() = listOfNotNull(
             PrintRoute.PDF.takeIf { canPdf },
-            PrintRoute.JPEG.takeIf { canJpeg },
             PrintRoute.RASTER.takeIf { canRaster },
             PrintRoute.URF.takeIf { canUrf },
+            PrintRoute.JPEG.takeIf { canJpeg },
         )
     val canPrint get() = routes.isNotEmpty()
 

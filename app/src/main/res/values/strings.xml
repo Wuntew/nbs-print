@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">NBS Print</string>
+    <string name="print_job_channel">Printing</string>
+    <string name="print_job_title">NBS Print is printing</string>
+    <string name="print_job_text">Sending your pages to the printer</string>
+    <string name="print_job_text_to">Sending your pages to %1$s</string>
 </resources>

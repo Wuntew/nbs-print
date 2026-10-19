@@ -173,6 +173,22 @@ states the cropped size. Route order PDF, JPEG, PWG raster, AirPrint (JPEG has r
 Verified on the mock: JPEG, PWG and URF jobs for a two-page file all decode to 2450x3200 px at 300 dpi
 (8.17 x 10.67 in) with the 1 inch square exactly 72 pt at (60, 60). Not verified: the real Canon.
 
+## v1.2.5: one job instead of one page at a time, and surviving screen-off (2026-10-18)
+
+**Report:** sizes were right (1.2.4), but pages were sent one by one, and the job timed out when the phone's
+screen turned off.
+
+**Fix:**
+- Route order back to PDF, PWG raster, AirPrint raster, JPEG: now that every image route is cropped to the
+  printable area and sent with fit (1.2.4), the single-job routes are safe as the default, and the printer
+  runs a multi-page job by itself. JPEG (one job per page, the app feeding the printer) is the last resort.
+- `PrintJobService`: a foreground service (dataSync) with a partial wake lock and a Wi-Fi lock, started when
+  a direct job begins and stopped when it ends. The job still runs in the view model; the service stops
+  Android freezing the process and sleeping the radio when the screen goes off.
+- Verified on the emulator: with the screen turned off mid-job all five JPEG pages still reached a slow
+  one-job-at-a-time mock, and the service was foreground during and gone after; an AirPrint printer received
+  one 5-page job at 2450x3200 px / 300 dpi. Not verified: the real Canon, or real Doze behaviour on a phone.
+
 ## Out of scope
 
 Office/web conversion, tiling oversized content across sheets, vector PDF output, password-protected PDFs,

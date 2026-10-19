@@ -23,6 +23,7 @@ import com.nbs.print.layout.PrintOptions
 import com.nbs.print.layout.ScaleSettings
 import com.nbs.print.print.DirectParams
 import com.nbs.print.print.DirectPrintJob
+import com.nbs.print.print.PrintJobService
 import com.nbs.print.print.DirectProgress
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -260,6 +261,7 @@ class PrintViewModel(app: Application) : AndroidViewModel(app) {
         val name = dest.printer.name
         val job = DirectPrintJob(getApplication(), IppClient.forDevice(getApplication()))
         activeJob = job
+        PrintJobService.start(getApplication(), name)
         doc.retain()
         _state.update { it.copy(job = JobState.Running(DirectProgress.Rendering(0, pages.size), name)) }
         printJob = viewModelScope.launch {
@@ -284,6 +286,7 @@ class PrintViewModel(app: Application) : AndroidViewModel(app) {
                 }
             } finally {
                 doc.close()
+                PrintJobService.stop(getApplication())
             }
         }
     }

@@ -51,11 +51,13 @@ the preview in the most dependable format the printer accepts:
 
 1. **PDF**, when the printer takes it. One document, so two-sided printing works too. The job is marked
    "don't rescale" so 100% stays 100%.
-2. **JPEG**, for printers with no PDF, such as many Canon PIXMA inkjets. JPEG is one page per job, so the
-   app sends a page, waits for the printer to finish it, then sends the next (retrying while the printer
-   says it is busy). Keep NBS Print open until a JPEG job finishes.
-3. **PWG raster** and 4. **AirPrint raster (URF)**: multi-page jobs with the resolution in each page header.
-   They are used only when a printer takes nothing else, or if you pick them under Options → Send as.
+2. **PWG raster** and 3. **AirPrint raster (URF)**, for printers with no PDF, such as many Canon PIXMA
+   inkjets. Every page goes in one job, so the printer runs it by itself once it has arrived.
+4. **JPEG**, the last resort. JPEG is one page per job, so the app sends a page, waits for the printer to
+   finish it, then sends the next (retrying while the printer says it is busy).
+
+While a job is being sent NBS Print runs a short "printing" notification and keeps the phone's Wi-Fi awake, so
+turning the screen off doesn't interrupt it.
 
 **Every image route (JPEG, PWG raster, AirPrint) is sized the same way**, so "Send as" and the number of
 pages never change the printed size. Printers are free to rescale a picture to their printable area whatever
