@@ -27,6 +27,10 @@ Requires Android 8.0 (API 26) or newer.
 - **Android print dialog too.** Printers that can't be reached directly (USB, Bluetooth, or ones that need
   their maker's plugin) still print through Android's print system, with the same scaling and page
   selection. Switch with the printer row above the Print button.
+- **Default settings.** The bookmark button at the top opens a sheet where "Save current settings as default"
+  stores your scale, position, paper, orientation, margins, image dpi, and (for direct printing) copies,
+  color, two-sided and Send as. Every file then opens with them, and "Reset to app settings" puts back 100%
+  and your local paper size. Pages always start as all selected.
 - **Position:** centered or top-left, with auto-rotate for landscape-on-portrait pages.
 - **Margins:** printer minimum, none, or custom (mm). Paper: Letter, A4, Legal, A5, A3, Tabloid, 4×6, 5×8.
 - **Images print at true size.** Photos carry no reliable physical size, so 100% assumes an image

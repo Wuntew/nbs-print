@@ -68,6 +68,8 @@ data class UiState(
     val discovered: List<PrinterRef> = emptyList(),
     val saved: List<PrinterRef> = emptyList(),
     val job: JobState? = null,
+    /** The settings the user saved as their starting point, if any. */
+    val defaults: Defaults? = null,
 ) {
     /** The pages that will print, or why the selection is unusable. */
     val selection: PageParse get() = PageRanges.resolve(pages, pageCount, page)
@@ -78,12 +80,16 @@ data class UiState(
 class PrintViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = app.getSharedPreferences("settings", 0)
     private val store = PrinterStore(app)
+    private val defaultsStore = DefaultsStore(prefs)
+    private val savedDefaults = defaultsStore.load()
 
     private val _state = MutableStateFlow(
         UiState(
-            options = PrintOptions(paper = savedPaper()),
+            options = savedDefaults?.options ?: PrintOptions(paper = savedPaper()),
+            direct = savedDefaults?.direct ?: DirectParams(),
             destination = store.destination(),
             saved = store.saved(),
+            defaults = savedDefaults,
         )
     )
     val state = _state
@@ -109,11 +115,12 @@ class PrintViewModel(app: Application) : AndroidViewModel(app) {
             }
             result.onSuccess { doc ->
                 val old = _state.value.doc
-                // Every new document starts at 100% / no scaling and with all pages selected.
+                // Every new document starts from the saved default scale (100% / no scaling unless the user
+                // saved something else) and with all pages selected.
                 _state.update {
                     it.copy(
                         doc = doc, loading = false, error = null, page = 0, preview = null, pageCount = 0,
-                        options = it.options.copy(scale = ScaleSettings()),
+                        options = it.options.copy(scale = it.defaults?.options?.scale ?: ScaleSettings()),
                         pages = PageSelection(),
                     )
                 }
@@ -170,7 +177,7 @@ class PrintViewModel(app: Application) : AndroidViewModel(app) {
             it.copy(
                 destination = dest,
                 caps = if (dest is Destination.Network) CapsState.Loading else CapsState.None,
-                direct = DirectParams(),
+                direct = it.defaults?.direct ?: DirectParams(),
                 saved = store.saved(),
             )
         }
@@ -237,6 +244,7 @@ class PrintViewModel(app: Application) : AndroidViewModel(app) {
                         direct = s.direct.copy(
                             copies = s.direct.copies.coerceIn(1, caps.copiesMax),
                             color = s.direct.color && caps.colorSupported,
+                            format = s.direct.format?.takeIf { it in caps.routes },
                         ),
                     )
                 }
@@ -247,6 +255,23 @@ class PrintViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun updateDirect(change: (DirectParams) -> DirectParams) = _state.update { it.copy(direct = change(it.direct)) }
+
+    // ---- defaults -----------------------------------------------------------------------------
+
+    /** Saves what is on screen now (scale, position, paper, margins, copies, color...) as the starting point. */
+    fun saveDefaults() {
+        val s = _state.value
+        val d = Defaults(s.options, s.direct)
+        defaultsStore.save(d)
+        _state.update { it.copy(defaults = d) }
+    }
+
+    /** Forgets the saved defaults and returns the current settings to the app's own. */
+    fun resetDefaults() {
+        defaultsStore.clear()
+        val factory = Defaults.factory()
+        _state.update { it.copy(defaults = null, options = factory.options, direct = factory.direct) }
+    }
 
     // ---- direct printing -----------------------------------------------------------------------
 

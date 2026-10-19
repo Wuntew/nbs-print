@@ -25,6 +25,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Print
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -83,9 +84,11 @@ class PrintActions(
     val onRetryCaps: () -> Unit,
     val onCancelJob: () -> Unit,
     val onDismissJob: () -> Unit,
+    val onSaveDefaults: () -> Unit,
+    val onResetDefaults: () -> Unit,
 )
 
-private enum class HomeSheet { Scale, Pages, Paper, Options }
+private enum class HomeSheet { Scale, Pages, Paper, Options, Defaults }
 
 private fun doneFooter(onDone: () -> Unit): @Composable () -> Unit = { InkPill("Done", onDone, Modifier.fillMaxWidth()) }
 
@@ -121,6 +124,7 @@ fun PrintScreen(state: UiState, a: PrintActions) {
             HomeSheet.Options -> if (network && state.printerCaps != null) {
                 SheetFrame(close, footer = doneFooter(close)) { OptionsSheet(state, a.onDirect) }
             }
+            HomeSheet.Defaults -> SheetFrame(close, footer = doneFooter(close)) { DefaultsSheet(state, a.onSaveDefaults, a.onResetDefaults) }
             null -> {}
         }
         if (state.pickerOpen) {
@@ -145,7 +149,7 @@ private fun Home(state: UiState, a: PrintActions, onOpenSheet: (HomeSheet) -> Un
             // the button is always reachable and only the tiles scroll on a short screen.
             Row(Modifier.fillMaxSize()) {
                 Column(Modifier.weight(1f).fillMaxHeight()) {
-                    Header(state, a)
+                    Header(state, a) { onOpenSheet(HomeSheet.Defaults) }
                     PaperHero(state, a, Modifier.weight(1f).fillMaxWidth())
                     if (state.pageCount > 1) Filmstrip(state, a.loadThumb, a.onTogglePage, Modifier.padding(bottom = 12.dp))
                 }
@@ -162,7 +166,7 @@ private fun Home(state: UiState, a: PrintActions, onOpenSheet: (HomeSheet) -> Un
             }
         } else {
             Column(Modifier.fillMaxSize()) {
-                Header(state, a)
+                Header(state, a) { onOpenSheet(HomeSheet.Defaults) }
                 PaperHero(state, a, Modifier.weight(1f).fillMaxWidth())
                 if (state.pageCount > 1) Filmstrip(state, a.loadThumb, a.onTogglePage, Modifier.padding(top = 4.dp, bottom = 14.dp))
                 Tiles(state, a, onOpenSheet, Modifier.padding(horizontal = 16.dp))
@@ -173,7 +177,7 @@ private fun Home(state: UiState, a: PrintActions, onOpenSheet: (HomeSheet) -> Un
 }
 
 @Composable
-private fun Header(state: UiState, a: PrintActions) {
+private fun Header(state: UiState, a: PrintActions, onOpenDefaults: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 20.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -192,6 +196,8 @@ private fun Header(state: UiState, a: PrintActions) {
             }
         }
         CircleIconButton(Icons.Default.FolderOpen, "Choose another file", a.onPick)
+        Spacer(Modifier.width(8.dp))
+        CircleIconButton(Icons.Default.Bookmark, "Default settings", onOpenDefaults)
         Spacer(Modifier.width(8.dp))
         CircleIconButton(Icons.Default.Tune, "Android printer settings", a.onPrinterSettings)
     }

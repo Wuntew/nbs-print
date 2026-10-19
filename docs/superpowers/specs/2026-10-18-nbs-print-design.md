@@ -189,6 +189,29 @@ screen turned off.
   one-job-at-a-time mock, and the service was foreground during and gone after; an AirPrint printer received
   one 5-page job at 2450x3200 px / 300 dpi. Not verified: the real Canon, or real Doze behaviour on a phone.
 
+## v1.3.0: default settings (2026-10-18)
+
+**Request:** the user must be able to set and save default settings.
+
+**Design:** one place, not one per sheet. A bookmark button in the header opens a "Default settings" sheet that
+shows what is saved (or the app's own settings when nothing is) and has "Save current settings as default"
+(disabled and labelled "Saved" while the screen matches the saved set) and "Reset to app settings". It saves
+everything the tiles control: scale mode and custom percent, position, auto-rotate, paper, orientation,
+margin mode and custom margin, image dpi, and the direct-print choices (copies, color, two-sided, Send as).
+Not saved: the page selection, which always starts as all pages.
+
+**Behaviour:** the saved set is applied at launch, its scale applies to every newly opened file (so 100%
+remains the default unless the user saved otherwise), and its copies, color, two-sided and Send as apply when
+a printer is picked, then are clamped to what that printer supports (copies up to its maximum, color only if
+it has color, a Send as format only if it takes it). Reset also puts the current screen back to the app's
+settings. `Defaults` is a plain data class with a key/value form (unreadable or out-of-range entries fall
+back to the app's own values) so it is unit tested without Android; `DefaultsStore` keeps it in
+SharedPreferences under a `default.` prefix.
+
+Verified on the emulator: saved Fill page and A4, force-stopped and relaunched the app, opened a file and it
+came up as Fill page on A4; Reset returned it to True size on Letter. The direct-print half is covered by unit
+tests and the clamping code, not by a run against a printer.
+
 ## Out of scope
 
 Office/web conversion, tiling oversized content across sheets, vector PDF output, password-protected PDFs,

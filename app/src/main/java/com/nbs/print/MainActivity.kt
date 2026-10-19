@@ -63,6 +63,8 @@ class MainActivity : ComponentActivity() {
                         onRetryCaps = vm::retryCaps,
                         onCancelJob = vm::cancelJob,
                         onDismissJob = vm::dismissJob,
+                        onSaveDefaults = vm::saveDefaults,
+                        onResetDefaults = vm::resetDefaults,
                     ),
                 )
             }
